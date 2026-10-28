@@ -190,6 +190,7 @@ def send_welcome(message):
         "/sms رقم نص - إرسال رسالة SMS\n"
         "/uptime - مدة تشغيل البوت\n"
         "/status - حالة البوت\n"
+        "/admins - قائمة المسؤولين المعتمدين\n"
         "/help - إظهار هذه الرسالة\n\n"
         "🔔 ملاحظة: تنبيهات البطارية تعمل تلقائياً عند 60%, 50%, 40%, 30%"
     )
@@ -226,6 +227,23 @@ def bot_status(message):
     )
     bot.reply_to(message, status)
     logger.info("تم طلب حالة البوت من المستخدم %s", message.from_user.id)
+
+# ================== /admins ==================
+@bot.message_handler(commands=["admins"])
+@admin_only
+def list_admins(message):
+    """عرض قائمة المسؤولين المعتمدين في البوت."""
+    if not ADMIN_IDS:
+        msg = "⚠️ لا يوجد مسؤولون معتمدون! تأكد من ضبط متغير ADMIN_ID."
+    else:
+        admins_list = "\n".join(f"• <code>{aid}</code>" for aid in sorted(ADMIN_IDS))
+        msg = (
+            f"👥 <b>المسؤولون المعتمدون ({len(ADMIN_IDS)}):</b>\n{admins_list}\n\n"
+            "➕ للإضافة: عدّل ADMIN_ID في ~/.bashrc أو .env بفواصل بين المعرفات،\n"
+            "ثم نفّذ: source ~/.bashrc وأعد تشغيل البوت."
+        )
+    bot.reply_to(message, msg, parse_mode="HTML")
+    logger.info("تم عرض قائمة المسؤولين للمستخدم %s", message.from_user.id)
 
 # ================== /ip ==================
 @bot.message_handler(commands=["ip"])
@@ -543,6 +561,7 @@ if __name__ == "__main__":
             telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
             telebot.types.BotCommand("uptime", "مدة تشغيل البوت"),
             telebot.types.BotCommand("status", "حالة البوت"),
+            telebot.types.BotCommand("admins", "قائمة المسؤولين المعتمدين"),
             telebot.types.BotCommand("help", "إظهار قائمة الأوامر"),
         ])
     except Exception as e:
