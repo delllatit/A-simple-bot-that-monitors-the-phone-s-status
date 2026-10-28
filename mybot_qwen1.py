@@ -9,28 +9,25 @@ import requests
 import subprocess
 import threading
 import datetime
-import atexit
-import signal
+import atexit       # NEW
+import signal       # NEW
 from pathlib import Path
 import telebot
 from dotenv import load_dotenv
 
 # ================== تحميل .env ==================
-# هذا يقرأ الملف .env الموجود في نفس المجلد
 load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 ADMIN_IDS_RAW = os.getenv("ADMIN_ID", "").strip()
-# دعم قائمة مسؤولين متعددة مفصولة بفواصل: ADMIN_ID="123,456"
 ADMIN_IDS = {int(x) for x in re.split(r"[,\s]+", ADMIN_IDS_RAW) if x.strip().lstrip("-").isdigit()}
 LOG_FILE = os.getenv("BOT_LOG_FILE", str(Path.home() / "bot-logs" / "mybot.log"))
-BATTERY_CHECK_INTERVAL = int(os.getenv("BATTERY_CHECK_INTERVAL", "1800"))  # ثوانٍ (افتراضي 30 دقائق)
+BATTERY_CHECK_INTERVAL = int(os.getenv("BATTERY_CHECK_INTERVAL", "1800"))
 
 # ================== إعدادات السجل ==================
 LOG_DIR = Path(LOG_FILE).parent
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 from logging.handlers import RotatingFileHandler
 
-# هاندلر الملف: يسجل بس من مستوى WARNING وفوق (يعني ERROR, CRITICAL)
 file_handler = RotatingFileHandler(
     LOG_FILE,
     maxBytes=1_000_000,
@@ -39,12 +36,11 @@ file_handler = RotatingFileHandler(
 )
 file_handler.setLevel(logging.WARNING)
 
-# هاندلر الشاشة: يبين كل شي أثناء التشغيل المباشر (اختياري تخليه INFO)
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 
 logging.basicConfig(
-    level=logging.INFO,  # المستوى العام (أقل حد بين الاثنين)
+    level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
     handlers=[file_handler, console_handler]
 )
@@ -59,16 +55,71 @@ bot = telebot.TeleBot(BOT_TOKEN)
 
 # ================== الإعدادات العامة ==================
 RECORDING_FILE = None
-RECORDING_LOCK = threading.Lock()  # لمنع حالة السباق بين /record و /stop
+RECORDING_LOCK = threading.Lock()
 RECORDING_DIR = Path.home() / "bot-logs"
 RECORDING_DIR.mkdir(parents=True, exist_ok=True)
+
+# NEW: حدث الإيقاف النظيف (يُشارَك بين الخيوط)
+SHUTDOWN = threading.Event()
+
+# NEW: تنظيف التسجيل النشط (idempotent - آمن للاستدعاء المتكرر)
+def _cleanup_recording():
+    """يوقف أي تسجيل نشط ويحذف الملف الحساس."""
+    global RECORDING_FILE
+    with RECORDING_LOCK:
+        path = RECORDING_FILE
+        RECORDING_FILE = None
+    if path is None:
+        return
+    try:
+        subprocess.run(
+            ["termux-microphone-record", "-q"],
+            capture_output=True, timeout=10
+        )
+    except Exception as e:
+        logger.warning("تعذر إيقاف التسجيل عند التنظيف: %s", e)
+    if path.exists():
+        try:
+            path.unlink()
+            logger.info("تم حذف ملف التسجيل المعلق: %s", path)
+        except OSError as e:
+            logger.warning("فشل حذف ملف التسجيل: %s", e)
+
+# NEW: تنظيف عند الإقلاع — يعالج الحالة التي انهار فيها البوت سابقًا (kill -9)
+def _cleanup_orphan_recordings():
+    """يوقف أي تسجيل شغّال من جلسة سابقة ويحذف ملفات تسجيل يتيمة."""
+    try:
+        subprocess.run(
+            ["termux-microphone-record", "-q"],
+            capture_output=True, timeout=10
+        )
+    except Exception:
+        pass
+    cutoff = time.time() - 3600
+    for f in RECORDING_DIR.glob("recording_*.m4a"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+                logger.info("حذف ملف تسجيل يتيم: %s", f)
+        except OSError:
+            pass
+
+# NEW: معالج إشارات SIGTERM / SIGINT
+def _signal_handler(signum, frame):
+    logger.info("تم استلام إشارة %s، بدء الإيقاف النظيف...", signum)
+    SHUTDOWN.set()
+    try:
+        bot.stop_polling()
+    except Exception:
+        pass
 
 # ================== متغيرات الوقت والتنبيهات ==================
 BOT_START_TIME = datetime.datetime.now()
 BATTERY_THRESHOLDS = [60, 50, 40, 30]
 alerted_thresholds = set()
+battery_api_warned = False  # NEW: لمنع تكرار تنبيه عدم توفر termux-api
 
-RATE_LIMIT_WINDOW = 3  # ثوانٍ بين الطلبات المتتالية لنفس المستخدم
+RATE_LIMIT_WINDOW = 3
 rate_limit_state = {}
 rate_limit_lock = threading.Lock()
 
@@ -86,10 +137,9 @@ def admin_only(func):
             try:
                 bot.reply_to(message, "🚫 عذراً، هذا البوت خاص بالمسؤول فقط.")
             except Exception:
-                pass  # لا نفشل المعالجة إذا تعذر إرسال الرد
+                pass
             return
 
-        # حد عدد الطلبات (Rate Limiting) لتجنب الإغراق
         now = time.monotonic()
         with rate_limit_lock:
             last = rate_limit_state.get(message.from_user.id, 0)
@@ -100,15 +150,22 @@ def admin_only(func):
         try:
             return func(message, *args, **kwargs)
         except telebot.apihelper.ApiTelegramException as e:
+            # MODIFIED: عرض تفاصيل الخطأ بدلًا من رسالة مبهمة
             logger.exception("خطأ في Telegram API أثناء معالجة الأمر: %s", e)
             try:
-                bot.reply_to(message, "❌ حدث خطأ أثناء تنفيذ الأمر.")
+                bot.reply_to(message, f"❌ خطأ Telegram API: {str(e)[:200]}")
+            except Exception:
+                pass
+        except Exception as e:
+            # NEW: لا نبتلع الأخطاء غير المتوقعة بصمت
+            logger.exception("خطأ غير متوقع في %s: %s", func.__name__, e)
+            try:
+                bot.reply_to(message, f"❌ خطأ غير متوقع: {type(e).__name__}: {str(e)[:200]}")
             except Exception:
                 pass
     return wrapper
 
 def safe_send(chat_id, text, **kwargs):
-    """إرسال رسالة مع تسجيل الأخطاء بصمت بدلاً من إسقاطها."""
     try:
         return bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
@@ -145,17 +202,18 @@ def parse_json_output(output):
 
 # ================== مراقبة البطارية في الخلفية ==================
 def battery_monitor():
-    while True:
+    global battery_api_warned  # NEW
+    while not SHUTDOWN.is_set():  # MODIFIED (fix 6): بدل while True
         try:
             result = subprocess.run(
                 ["termux-battery-status"],
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0 and result.stdout.strip():
+                battery_api_warned = False  # NEW: إعادة الضبط عند النجاح
                 data = json.loads(result.stdout)
                 percentage = data.get("percentage")
                 if percentage is not None:
-                    # التحقق من عتبات التنبيه
                     for threshold in BATTERY_THRESHOLDS:
                         if percentage < threshold and threshold not in alerted_thresholds:
                             for admin_id in ADMIN_IDS:
@@ -166,14 +224,23 @@ def battery_monitor():
                                 )
                             alerted_thresholds.add(threshold)
 
-                    # إعادة تعيين التنبيهات إذا تم الشحن فوق 60%
-                    if percentage >= 60:
+                    # MODIFIED (fix 1): هامش 5% لمنع الوميض حول العتبة
+                    if percentage >= 65:
                         alerted_thresholds.clear()
+        except FileNotFoundError:
+            # NEW (fix 5): تنبيه مرة واحدة إذا كان termux-api غير مثبت
+            if not battery_api_warned:
+                battery_api_warned = True
+                for admin_id in ADMIN_IDS:
+                    safe_send(
+                        admin_id,
+                        "⚠️ termux-api غير مثبت أو termux-battery-status غير متاح. تنبيهات البطارية معطلة حتى إصلاح ذلك."
+                    )
+                logger.error("termux-battery-status غير موجود أو غير مثبت")
         except Exception as e:
             logger.error(f"خطأ في مراقبة البطارية: {e}")
 
-        # فحص البطارية كل BATTERY_CHECK_INTERVAL ثانية (افتراضي 5 دقائق)
-        time.sleep(BATTERY_CHECK_INTERVAL)
+        SHUTDOWN.wait(BATTERY_CHECK_INTERVAL)  # MODIFIED (fix 6): بدل time.sleep
 
 # ================== /start و /help ==================
 @bot.message_handler(commands=["start", "help"])
@@ -198,6 +265,7 @@ def send_welcome(message):
     )
     bot.reply_to(message, text)
     logger.info("تم عرض قائمة الأوامر للمستخدم %s", message.from_user.id)
+
 # ================== /uptime ==================
 @bot.message_handler(commands=["uptime"])
 @admin_only
@@ -234,7 +302,6 @@ def bot_status(message):
 @bot.message_handler(commands=["admins"])
 @admin_only
 def list_admins(message):
-    """عرض قائمة المسؤولين المعتمدين في البوت."""
     if not ADMIN_IDS:
         msg = "⚠️ لا يوجد مسؤولون معتمدون! تأكد من ضبط متغير ADMIN_ID."
     else:
@@ -261,7 +328,6 @@ def get_ip(message):
         wifi = json.loads(wifi_result.stdout) if wifi_result.stdout.strip() else {}
         local_ip = wifi.get("ip", "غير متاح")
 
-        # استبدال curl بمكتبة requests مباشرة (أسرع ولا يحتاج عملية خارجية)
         resp = requests.get("https://api.ipify.org", timeout=10)
         resp.raise_for_status()
         public_ip = resp.text.strip() or "تعذر تحديده"
@@ -356,7 +422,6 @@ def get_network_info(message):
 
 # ================== /location ==================
 def fetch_gps_location(message):
-    """تحديد الموقع في خيط منفصل حتى لا يُحظر الـ Polling أثناء محاولة الـ GPS."""
     best_location = None
 
     for attempt in range(3):
@@ -440,7 +505,7 @@ def start_recording(message):
                 detail = (result.stderr or result.stdout).strip()
                 bot.reply_to(message, "❌ تعذر بدء التسجيل.\n" + detail[:800])
                 logger.warning("فشل بدء التسجيل: %s", detail)
-                return  # RECORDING_FILE يبقى None تلقائياً عند الفشل
+                return
 
             RECORDING_FILE = file_path
             bot.reply_to(message, "🎙️ بدأ التسجيل الصوتي.\nأرسل /stop لإيقافه وإرسال الملف.")
@@ -460,7 +525,7 @@ def stop_recording(message):
             bot.reply_to(message, "ℹ️ لا يوجد تسجيل نشط.")
             return
         path = RECORDING_FILE
-        RECORDING_FILE = None  # تصفير الحالة فوراً لمنع تعليق البوت أو إيقاف مزدوج
+        RECORDING_FILE = None
 
     result = None
 
@@ -491,7 +556,6 @@ def stop_recording(message):
         logger.exception("خطأ أثناء إيقاف التسجيل")
         bot.reply_to(message, f"❌ حدث خطأ: {e}")
     finally:
-        # حذف الملف الحساس بعد الإرسال أو المحاولة
         try:
             if path.exists():
                 path.unlink()
@@ -510,7 +574,6 @@ def send_sms(message):
     phone_number = re.sub(r"\s+", "", parts[1])
     sms_text = parts[2].strip()
 
-    # التحقق من صحة رقم الهاتف قبل الإرسال (7-15 رقماً، يبدأ بـ + أو أرقام)
     if not re.fullmatch(r"\+?\d{7,15}", phone_number) or not sms_text:
         bot.reply_to(message, "❌ رقم هاتف غير صالح. استخدم الصيغة الدولية مثل: 9665XXXXXXXX")
         return
@@ -540,19 +603,26 @@ def send_sms(message):
 # ================== التعامل مع الرسائل غير المعروفة ==================
 @bot.message_handler(content_types=["text"])
 def handle_unknown(message):
-    # المسؤول فقط يحصل على رد
+    # NEW (fix 2): تجاهل صامت لغير المسؤول — يمنع كشف وجود البوت + log spam
     if not is_admin(message):
-        return  # تجاهل صامت تماماً
+        return
     if message.text and message.text.startswith("/"):
-        logger.info("أمر غير معروف: %s من المستخدم %s",
-                    message.text, message.from_user.id)
+        logger.info("أمر غير معروف: %s من المستخدم %s", message.text, message.from_user.id if message.from_user else "unknown")
         bot.reply_to(message, "❓ أمر غير معروف. أرسل /help لعرض القائمة.")
+
 # ================== تشغيل البوت ==================
 if __name__ == "__main__":
+    # NEW (fix 3): تنظيف التسجيلات اليتيمة من جلسة سابقة
+    _cleanup_orphan_recordings()
+
+    # NEW (fix 3 + 6): تسجيل handlers للتنظيف والإيقاف
+    atexit.register(_cleanup_recording)
+    signal.signal(signal.SIGTERM, _signal_handler)
+    signal.signal(signal.SIGINT, _signal_handler)
+
     logger.info("البوت بدأ التشغيل...")
     print("البوت يعمل الآن...")
 
-    # تسجيل قائمة الأوامر في Telegram (تظهر تلقائياً بدون أزرار)
     try:
         bot.set_my_commands([
             telebot.types.BotCommand("selfie", "تصوير بالكاميرا الأمامية"),
@@ -572,82 +642,22 @@ if __name__ == "__main__":
     except Exception as e:
         logger.warning("تعذر تسجيل قائمة الأوامر: %s", e)
 
-    # تشغيل خيط مراقبة البطارية في الخلفية
     monitor_thread = threading.Thread(target=battery_monitor, daemon=True)
     monitor_thread.start()
 
-    backoff = 5  # تراجع تصاعدي لإعادة الاتصال
-    while True:
+    backoff = 5
+    while not SHUTDOWN.is_set():  # MODIFIED (fix 6): بدل while True
         try:
             bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
-            backoff = 5  # إعادة ضبط التراجع عند انتهاء طبيعي
+            backoff = 5
         except requests.exceptions.ReadTimeout:
             logger.warning("انتهت مهلة الاتصال، سيتم إعادة المحاولة.")
-            time.sleep(min(backoff, 60))
+            SHUTDOWN.wait(min(backoff, 60))  # MODIFIED (fix 6)
         except requests.exceptions.RequestException as e:
             logger.exception("خطأ اتصال: %s", e)
-            time.sleep(min(backoff, 60))
-            backoff = min(backoff * 2, 300)  # مضاعفة الانتظار حتى 5 دقائق كحد أقصى
+            SHUTDOWN.wait(min(backoff, 60))  # MODIFIED (fix 6)
+            backoff = min(backoff * 2, 300)
         except Exception as e:
             logger.exception("خطأ غير متوقع في البوت: %s", e)
-            time.sleep(min(backoff, 60))
+            SHUTDOWN.wait(min(backoff, 60))  # MODIFIED (fix 6)
             backoff = min(backoff * 2, 300)
-
-def _cleanup_recording():
-    """يُستدعى عند خروج البوت (طبيعي أو بـ SIGTERM)."""
-    global RECORDING_FILE
-    with RECORDING_LOCK:
-        path = RECORDING_FILE
-        RECORDING_FILE = None
-
-    # إيقاف أي تسجيل شغّال
-    try:
-        subprocess.run(
-            ["termux-microphone-record", "-q"],
-            capture_output=True, timeout=10
-        )
-    except Exception as e:
-        logger.warning("تعذر إيقاف التسجيل عند الخروج: %s", e)
-
-    # حذف الملف الحساس
-    if path and path.exists():
-        try:
-            path.unlink()
-            logger.info("تم حذف ملف التسجيل المعلق: %s", path)
-        except OSError:
-            pass
-
-atexit.register(_cleanup_recording)
-
-# للتعامل مع SIGTERM (kill) وSIGINT (Ctrl+C)
-def _signal_handler(signum, frame):
-    logger.info("تم استلام إشارة %s، إيقاف نظيف...", signum)
-    _cleanup_recording()
-    bot.stop_polling()
-    raise SystemExit(0)
-
-signal.signal(signal.SIGTERM, _signal_handler)
-signal.signal(signal.SIGINT, _signal_handler)
-def _cleanup_orphan_recordings():
-    """عند الإقلاع: إيقاف أي تسجيل شغّال وحذف ملفات تسجيل قديمة."""
-    # إيقاف أي تسجيل شغّال في الخلفية
-    try:
-        subprocess.run(
-            ["termux-microphone-record", "-q"],
-            capture_output=True, timeout=10
-        )
-    except Exception:
-        pass
-
-    # حذف ملفات تسجيل أقدم من ساعة (تبقّت من انهيارات سابقة)
-    cutoff = time.time() - 3600
-    for f in RECORDING_DIR.glob("recording_*.m4a"):
-        try:
-            if f.stat().st_mtime < cutoff:
-                f.unlink()
-                logger.info("حذف ملف تسجيل يتيم: %s", f)
-        except OSError:
-            pass
-
-# نادها قبل bot.infinity_polling()
-_cleanup_orphan_recordings()
