@@ -9,6 +9,8 @@ import requests
 import subprocess
 import threading
 import datetime
+import atexit
+import signal
 from pathlib import Path
 import telebot
 from dotenv import load_dotenv
@@ -538,10 +540,13 @@ def send_sms(message):
 # ================== التعامل مع الرسائل غير المعروفة ==================
 @bot.message_handler(content_types=["text"])
 def handle_unknown(message):
+    # المسؤول فقط يحصل على رد
+    if not is_admin(message):
+        return  # تجاهل صامت تماماً
     if message.text and message.text.startswith("/"):
-        logger.info("أمر غير معروف: %s من المستخدم %s", message.text, message.from_user.id if message.from_user else "unknown")
+        logger.info("أمر غير معروف: %s من المستخدم %s",
+                    message.text, message.from_user.id)
         bot.reply_to(message, "❓ أمر غير معروف. أرسل /help لعرض القائمة.")
-
 # ================== تشغيل البوت ==================
 if __name__ == "__main__":
     logger.info("البوت بدأ التشغيل...")
@@ -587,3 +592,62 @@ if __name__ == "__main__":
             logger.exception("خطأ غير متوقع في البوت: %s", e)
             time.sleep(min(backoff, 60))
             backoff = min(backoff * 2, 300)
+
+def _cleanup_recording():
+    """يُستدعى عند خروج البوت (طبيعي أو بـ SIGTERM)."""
+    global RECORDING_FILE
+    with RECORDING_LOCK:
+        path = RECORDING_FILE
+        RECORDING_FILE = None
+
+    # إيقاف أي تسجيل شغّال
+    try:
+        subprocess.run(
+            ["termux-microphone-record", "-q"],
+            capture_output=True, timeout=10
+        )
+    except Exception as e:
+        logger.warning("تعذر إيقاف التسجيل عند الخروج: %s", e)
+
+    # حذف الملف الحساس
+    if path and path.exists():
+        try:
+            path.unlink()
+            logger.info("تم حذف ملف التسجيل المعلق: %s", path)
+        except OSError:
+            pass
+
+atexit.register(_cleanup_recording)
+
+# للتعامل مع SIGTERM (kill) وSIGINT (Ctrl+C)
+def _signal_handler(signum, frame):
+    logger.info("تم استلام إشارة %s، إيقاف نظيف...", signum)
+    _cleanup_recording()
+    bot.stop_polling()
+    raise SystemExit(0)
+
+signal.signal(signal.SIGTERM, _signal_handler)
+signal.signal(signal.SIGINT, _signal_handler)
+def _cleanup_orphan_recordings():
+    """عند الإقلاع: إيقاف أي تسجيل شغّال وحذف ملفات تسجيل قديمة."""
+    # إيقاف أي تسجيل شغّال في الخلفية
+    try:
+        subprocess.run(
+            ["termux-microphone-record", "-q"],
+            capture_output=True, timeout=10
+        )
+    except Exception:
+        pass
+
+    # حذف ملفات تسجيل أقدم من ساعة (تبقّت من انهيارات سابقة)
+    cutoff = time.time() - 3600
+    for f in RECORDING_DIR.glob("recording_*.m4a"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+                logger.info("حذف ملف تسجيل يتيم: %s", f)
+        except OSError:
+            pass
+
+# نادها قبل bot.infinity_polling()
+_cleanup_orphan_recordings()
