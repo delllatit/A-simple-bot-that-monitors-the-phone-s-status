@@ -3,6 +3,7 @@ import re
 import json
 import time
 import html
+import functools
 import logging
 import requests
 import subprocess
@@ -16,8 +17,11 @@ from dotenv import load_dotenv
 # هذا يقرأ الملف .env الموجود في نفس المجلد
 load_dotenv()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
-ADMIN_ID = os.getenv("ADMIN_ID", "0").strip()
+ADMIN_IDS_RAW = os.getenv("ADMIN_ID", "").strip()
+# دعم قائمة مسؤولين متعددة مفصولة بفواصل: ADMIN_ID="123,456"
+ADMIN_IDS = {int(x) for x in re.split(r"[,\s]+", ADMIN_IDS_RAW) if x.strip().lstrip("-").isdigit()}
 LOG_FILE = os.getenv("BOT_LOG_FILE", str(Path.home() / "bot-logs" / "mybot.log"))
+BATTERY_CHECK_INTERVAL = int(os.getenv("BATTERY_CHECK_INTERVAL", "300"))  # ثوانٍ (افتراضي 5 دقائق)
 
 # ================== إعدادات السجل ==================
 LOG_DIR = Path(LOG_FILE).parent
@@ -46,15 +50,14 @@ logger = logging.getLogger("telegram_bot")
 
 if not BOT_TOKEN:
     raise SystemExit("❌ لم يتم العثور على TELEGRAM_BOT_TOKEN داخل ملف .env أو البيئة.")
-try:
-    ADMIN_ID = int(ADMIN_ID)
-except ValueError:
-    raise SystemExit("❌ قيمة ADMIN_ID غير صحيحة. يجب أن تكون رقمًا مثل: 6002823280")
+if not ADMIN_IDS:
+    raise SystemExit("❌ قيمة ADMIN_ID غير صحيحة أو فارغة. يجب أن تكون رقمًا مثل: 6002823280 (أو قائمة مفصولة بفواصل)")
 
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # ================== الإعدادات العامة ==================
 RECORDING_FILE = None
+RECORDING_LOCK = threading.Lock()  # لمنع حالة السباق بين /record و /stop
 RECORDING_DIR = Path.home() / "bot-logs"
 RECORDING_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -63,16 +66,52 @@ BOT_START_TIME = datetime.datetime.now()
 BATTERY_THRESHOLDS = [60, 50, 40, 30]
 alerted_thresholds = set()
 
+RATE_LIMIT_WINDOW = 3  # ثوانٍ بين الطلبات المتتالية لنفس المستخدم
+rate_limit_state = {}
+rate_limit_lock = threading.Lock()
+
 # ================== الوظائف المساعدة ==================
 def is_admin(message):
-    if not message.from_user or message.from_user.id != ADMIN_ID:
+    return bool(message.from_user) and message.from_user.id in ADMIN_IDS
+
+def admin_only(func):
+    """Decorator للتحقق من صلاحيات المسؤول + حد عدد الطلبات، بدلاً من تكرار الفحص."""
+    @functools.wraps(func)
+    def wrapper(message, *args, **kwargs):
+        if not is_admin(message):
+            uid = getattr(message.from_user, "id", "unknown")
+            logger.warning("محاولة وصول غير مصرح بها من المستخدم %s", uid)
+            try:
+                bot.reply_to(message, "🚫 عذراً، هذا البوت خاص بالمسؤول فقط.")
+            except Exception:
+                pass  # لا نفشل المعالجة إذا تعذر إرسال الرد
+            return
+
+        # حد عدد الطلبات (Rate Limiting) لتجنب الإغراق
+        now = time.monotonic()
+        with rate_limit_lock:
+            last = rate_limit_state.get(message.from_user.id, 0)
+            if now - last < RATE_LIMIT_WINDOW:
+                return
+            rate_limit_state[message.from_user.id] = now
+
         try:
-            bot.reply_to(message, "🚫 عذراً، هذا البوت خاص بالمسؤول فقط.")
-        except Exception:
-            pass
-        logger.warning("محاولة وصول غير مصرح بها من المستخدم %s", getattr(message.from_user, "id", "unknown"))
-        return False
-    return True
+            return func(message, *args, **kwargs)
+        except telebot.apihelper.ApiTelegramException as e:
+            logger.exception("خطأ في Telegram API أثناء معالجة الأمر: %s", e)
+            try:
+                bot.reply_to(message, "❌ حدث خطأ أثناء تنفيذ الأمر.")
+            except Exception:
+                pass
+    return wrapper
+
+def safe_send(chat_id, text, **kwargs):
+    """إرسال رسالة مع تسجيل الأخطاء بصمت بدلاً من إسقاطها."""
+    try:
+        return bot.send_message(chat_id, text, **kwargs)
+    except Exception as e:
+        logger.error("فشل إرسال تنبيه إلى %s: %s", chat_id, e)
+        return None
 
 def run_termux_command(command, timeout=30):
     try:
@@ -117,11 +156,12 @@ def battery_monitor():
                     # التحقق من عتبات التنبيه
                     for threshold in BATTERY_THRESHOLDS:
                         if percentage < threshold and threshold not in alerted_thresholds:
-                            bot.send_message(
-                                ADMIN_ID,
-                                f"⚠️ <b>تنبيه البطارية:</b>\nالنسبة الحالية: {percentage}%\n(وصلت إلى أقل من {threshold}%)",
-                                parse_mode="HTML"
-                            )
+                            for admin_id in ADMIN_IDS:
+                                safe_send(
+                                    admin_id,
+                                    f"⚠️ <b>تنبيه البطارية:</b>\nالنسبة الحالية: {percentage}%\n(وصلت إلى أقل من {threshold}%)",
+                                    parse_mode="HTML"
+                                )
                             alerted_thresholds.add(threshold)
 
                     # إعادة تعيين التنبيهات إذا تم الشحن فوق 60%
@@ -130,14 +170,13 @@ def battery_monitor():
         except Exception as e:
             logger.error(f"خطأ في مراقبة البطارية: {e}")
 
-        # فحص البطارية كل 5 دقائق (300 ثانية) لتجنب استهلاك الموارد
-        time.sleep(18000)
+        # فحص البطارية كل BATTERY_CHECK_INTERVAL ثانية (افتراضي 5 دقائق)
+        time.sleep(BATTERY_CHECK_INTERVAL)
 
 # ================== /start و /help ==================
 @bot.message_handler(commands=["start", "help"])
+@admin_only
 def send_welcome(message):
-    if not is_admin(message):
-        return
     text = (
         "أهلاً بك! الأوامر المتاحة:\n\n"
         "/selfie - تصوير بالكاميرا الأمامية\n"
@@ -158,9 +197,8 @@ def send_welcome(message):
     logger.info("تم عرض قائمة الأوامر للمستخدم %s", message.from_user.id)
 # ================== /uptime ==================
 @bot.message_handler(commands=["uptime"])
+@admin_only
 def get_uptime(message):
-    if not is_admin(message):
-        return
     now = datetime.datetime.now()
     delta = now - BOT_START_TIME
 
@@ -178,12 +216,11 @@ def get_uptime(message):
 
 # ================== /status ==================
 @bot.message_handler(commands=["status"])
+@admin_only
 def bot_status(message):
-    if not is_admin(message):
-        return
     status = (
         "🟢 حالة البوت: يعمل\n"
-        f"👤 المسؤول: {ADMIN_ID}\n"
+        f"👤 المسؤولون: {', '.join(map(str, sorted(ADMIN_IDS)))}\n"
         f"📄 سجل التشغيل: {LOG_FILE}\n"
         f"🕐 الوقت: {time.strftime('%Y-%m-%d %H:%M:%S')}"
     )
@@ -192,9 +229,8 @@ def bot_status(message):
 
 # ================== /ip ==================
 @bot.message_handler(commands=["ip"])
+@admin_only
 def get_ip(message):
-    if not is_admin(message):
-        return
     try:
         wifi_result = subprocess.run(
             ["termux-wifi-connectioninfo"],
@@ -205,14 +241,10 @@ def get_ip(message):
         wifi = json.loads(wifi_result.stdout) if wifi_result.stdout.strip() else {}
         local_ip = wifi.get("ip", "غير متاح")
 
-        public_result = subprocess.run(
-            ["curl", "-4", "-sS", "--max-time", "10", "https://api.ipify.org"],
-            capture_output=True,
-            text=True,
-            timeout=12,
-            check=True
-        )
-        public_ip = public_result.stdout.strip() or "تعذر تحديده"
+        # استبدال curl بمكتبة requests مباشرة (أسرع ولا يحتاج عملية خارجية)
+        resp = requests.get("https://api.ipify.org", timeout=10)
+        resp.raise_for_status()
+        public_ip = resp.text.strip() or "تعذر تحديده"
 
         bot.reply_to(message, f"📱 IP المحلي: {local_ip}\n🌍 IP العام: {public_ip}")
         logger.info("تم جلب IP للمستخدم %s", message.from_user.id)
@@ -222,10 +254,9 @@ def get_ip(message):
 
 # ================== /selfie و /photo ==================
 @bot.message_handler(commands=["selfie", "photo"])
+@admin_only
 def handle_photo_request(message):
-    if not is_admin(message):
-        return
-    command = message.text.split()[0].split("@")[0].lower()
+    command = (message.text or "").split()[0].split("@")[0].lower()
     camera_id = "1" if command == "/selfie" else "0"
     camera_name = "الأمامية" if camera_id == "1" else "الخلفية"
 
@@ -254,9 +285,8 @@ def handle_photo_request(message):
 
 # ================== /battery ==================
 @bot.message_handler(commands=["battery"])
+@admin_only
 def get_battery_info(message):
-    if not is_admin(message):
-        return
     output = run_termux_command(["termux-battery-status"])
     data = parse_json_output(output)
 
@@ -279,9 +309,8 @@ def get_battery_info(message):
 
 # ================== /network ==================
 @bot.message_handler(commands=["network"])
+@admin_only
 def get_network_info(message):
-    if not is_admin(message):
-        return
     output = run_termux_command(["termux-wifi-connectioninfo"])
     data = parse_json_output(output)
 
@@ -306,10 +335,8 @@ def get_network_info(message):
     logger.info("تم جلب معلومات الشبكة للمستخدم %s", message.from_user.id)
 
 # ================== /location ==================
-@bot.message_handler(commands=["location"])
-def get_location(message):
-    if not is_admin(message):
-        return
+def fetch_gps_location(message):
+    """تحديد الموقع في خيط منفصل حتى لا يُحظر الـ Polling أثناء محاولة الـ GPS."""
     best_location = None
 
     for attempt in range(3):
@@ -348,7 +375,7 @@ def get_location(message):
             time.sleep(2)
 
     if best_location is None:
-        bot.reply_to(message, "❌ تعذر الحصول على موقع GPS صالح.\nتأكد من تفعيل الموقع وصلاحية Termux:API.")
+        safe_send(message.chat.id, "❌ تعذر الحصول على موقع GPS صالح.\nتأكد من تفعيل الموقع وصلاحية Termux:API.")
         logger.warning("لم يتم الحصول على موقع GPS للمستخدم %s", message.from_user.id)
         return
 
@@ -357,58 +384,64 @@ def get_location(message):
     accuracy = best_location["accuracy"]
     maps_url = f"https://maps.google.com/?q={lat},{lon}"
 
-    bot.reply_to(
-        message,
+    safe_send(
+        message.chat.id,
         f"📍 موقع الهاتف\nخط العرض: {lat}\nخط الطول: {lon}\n"
         f"🎯 الدقة المقدرة: ±{accuracy:.1f} متر\n🗺️ الخريطة: {maps_url}"
     )
     logger.info("تم جلب موقع GPS للمستخدم %s", message.from_user.id)
 
+@bot.message_handler(commands=["location"])
+@admin_only
+def get_location(message):
+    threading.Thread(target=fetch_gps_location, args=(message,), daemon=True).start()
+
 # ================== /record و /stop ==================
 @bot.message_handler(commands=["record"])
+@admin_only
 def start_recording(message):
     global RECORDING_FILE
-    if not is_admin(message):
-        return
 
-    if RECORDING_FILE is not None:
-        bot.reply_to(message, "⚠️ التسجيل يعمل بالفعل. أرسل /stop لإنهائه.")
-        return
-
-    file_path = RECORDING_DIR / ("recording_" + time.strftime("%Y%m%d_%H%M%S") + ".m4a")
-
-    try:
-        result = subprocess.run(
-            ["termux-microphone-record", "-f", str(file_path), "-l", "0", "-e", "aac"],
-            capture_output=True,
-            text=True,
-            timeout=15
-        )
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout).strip()
-            bot.reply_to(message, "❌ تعذر بدء التسجيل.\n" + detail[:800])
-            logger.warning("فشل بدء التسجيل: %s", detail)
+    with RECORDING_LOCK:
+        if RECORDING_FILE is not None:
+            bot.reply_to(message, "⚠️ التسجيل يعمل بالفعل. أرسل /stop لإنهائه.")
             return
 
-        RECORDING_FILE = file_path
-        bot.reply_to(message, "🎙️ بدأ التسجيل الصوتي.\nأرسل /stop لإيقافه وإرسال الملف.")
-        logger.info("بدأ تسجيل صوتي للمستخدم %s", message.from_user.id)
-    except Exception as e:
-        RECORDING_FILE = None
-        logger.exception("خطأ في بدء التسجيل")
-        bot.reply_to(message, f"❌ خطأ في بدء التسجيل: {e}")
+        file_path = RECORDING_DIR / ("recording_" + time.strftime("%Y%m%d_%H%M%S") + ".m4a")
+
+        try:
+            result = subprocess.run(
+                ["termux-microphone-record", "-f", str(file_path), "-l", "0", "-e", "aac"],
+                capture_output=True,
+                text=True,
+                timeout=15
+            )
+            if result.returncode != 0:
+                detail = (result.stderr or result.stdout).strip()
+                bot.reply_to(message, "❌ تعذر بدء التسجيل.\n" + detail[:800])
+                logger.warning("فشل بدء التسجيل: %s", detail)
+                return  # RECORDING_FILE يبقى None تلقائياً عند الفشل
+
+            RECORDING_FILE = file_path
+            bot.reply_to(message, "🎙️ بدأ التسجيل الصوتي.\nأرسل /stop لإيقافه وإرسال الملف.")
+            logger.info("بدأ تسجيل صوتي للمستخدم %s", message.from_user.id)
+        except Exception as e:
+            RECORDING_FILE = None
+            logger.exception("خطأ في بدء التسجيل")
+            bot.reply_to(message, f"❌ خطأ في بدء التسجيل: {e}")
 
 @bot.message_handler(commands=["stop"])
+@admin_only
 def stop_recording(message):
     global RECORDING_FILE
-    if not is_admin(message):
-        return
 
-    if RECORDING_FILE is None:
-        bot.reply_to(message, "ℹ️ لا يوجد تسجيل نشط.")
-        return
+    with RECORDING_LOCK:
+        if RECORDING_FILE is None:
+            bot.reply_to(message, "ℹ️ لا يوجد تسجيل نشط.")
+            return
+        path = RECORDING_FILE
+        RECORDING_FILE = None  # تصفير الحالة فوراً لمنع تعليق البوت أو إيقاف مزدوج
 
-    path = RECORDING_FILE
     result = None
 
     try:
@@ -438,39 +471,29 @@ def stop_recording(message):
         logger.exception("خطأ أثناء إيقاف التسجيل")
         bot.reply_to(message, f"❌ حدث خطأ: {e}")
     finally:
-        if result is not None and result.returncode == 0:
-            RECORDING_FILE = None
-            try:
-                if path.exists():
-                    path.unlink()
-            except OSError:
-                pass
+        # حذف الملف الحساس بعد الإرسال أو المحاولة
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
 
 # ================== /sms ==================
 @bot.message_handler(commands=["sms"])
+@admin_only
 def send_sms(message):
-    if not is_admin(message):
-        return
-
-    text = message.text.strip()
-    if not text:
+    parts = (message.text or "").split(maxsplit=2)
+    if len(parts) < 3:
         bot.reply_to(message, "❌ استخدم الأمر بالشكل التالي:\n/sms 966500000000 مرحبا")
         return
 
-    command_body = text.split(maxsplit=1)
-    if len(command_body) < 2:
-        bot.reply_to(message, "❌ استخدم الأمر بالشكل التالي:\n/sms 966500000000 مرحبا")
+    phone_number = re.sub(r"\s+", "", parts[1])
+    sms_text = parts[2].strip()
+
+    # التحقق من صحة رقم الهاتف قبل الإرسال (7-15 رقماً، يبدأ بـ + أو أرقام)
+    if not re.fullmatch(r"\+?\d{7,15}", phone_number) or not sms_text:
+        bot.reply_to(message, "❌ رقم هاتف غير صالح. استخدم الصيغة الدولية مثل: 9665XXXXXXXX")
         return
-
-    phone_number = command_body[1].split(maxsplit=1)[0]
-    sms_text = command_body[1].split(maxsplit=1)[1] if len(command_body[1].split(maxsplit=1)) > 1 else ""
-
-    if not phone_number or not sms_text:
-        bot.reply_to(message, "❌ استخدم الأمر بالشكل التالي:\n/sms 966500000000 مرحبا")
-        return
-
-    phone_number = re.sub(r"\s+", "", phone_number)
-    sms_text = sms_text.strip()
 
     try:
         result = subprocess.run(
@@ -495,30 +518,53 @@ def send_sms(message):
         bot.reply_to(message, f"❌ حدث خطأ أثناء إرسال SMS:\n{e}")
 
 # ================== التعامل مع الرسائل غير المعروفة ==================
-@bot.message_handler(func=lambda message: True)
+@bot.message_handler(content_types=["text"])
 def handle_unknown(message):
     if message.text and message.text.startswith("/"):
         logger.info("أمر غير معروف: %s من المستخدم %s", message.text, message.from_user.id if message.from_user else "unknown")
-        return
+        bot.reply_to(message, "❓ أمر غير معروف. أرسل /help لعرض القائمة.")
 
 # ================== تشغيل البوت ==================
 if __name__ == "__main__":
     logger.info("البوت بدأ التشغيل...")
     print("البوت يعمل الآن...")
 
+    # تسجيل قائمة الأوامر في Telegram (تظهر تلقائياً بدون أزرار)
+    try:
+        bot.set_my_commands([
+            telebot.types.BotCommand("selfie", "تصوير بالكاميرا الأمامية"),
+            telebot.types.BotCommand("photo", "تصوير بالكاميرا الخلفية"),
+            telebot.types.BotCommand("battery", "معلومات البطارية"),
+            telebot.types.BotCommand("network", "معلومات Wi-Fi"),
+            telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
+            telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),
+            telebot.types.BotCommand("record", "بدء التسجيل الصوتي"),
+            telebot.types.BotCommand("stop", "إيقاف التسجيل وإرساله"),
+            telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
+            telebot.types.BotCommand("uptime", "مدة تشغيل البوت"),
+            telebot.types.BotCommand("status", "حالة البوت"),
+            telebot.types.BotCommand("help", "إظهار قائمة الأوامر"),
+        ])
+    except Exception as e:
+        logger.warning("تعذر تسجيل قائمة الأوامر: %s", e)
+
     # تشغيل خيط مراقبة البطارية في الخلفية
     monitor_thread = threading.Thread(target=battery_monitor, daemon=True)
     monitor_thread.start()
 
+    backoff = 5  # تراجع تصاعدي لإعادة الاتصال
     while True:
         try:
-            bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=False)
+            bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
+            backoff = 5  # إعادة ضبط التراجع عند انتهاء طبيعي
         except requests.exceptions.ReadTimeout:
             logger.warning("انتهت مهلة الاتصال، سيتم إعادة المحاولة.")
-            time.sleep(5)
+            time.sleep(min(backoff, 60))
         except requests.exceptions.RequestException as e:
             logger.exception("خطأ اتصال: %s", e)
-            time.sleep(10)
+            time.sleep(min(backoff, 60))
+            backoff = min(backoff * 2, 300)  # مضاعفة الانتظار حتى 5 دقائق كحد أقصى
         except Exception as e:
             logger.exception("خطأ غير متوقع في البوت: %s", e)
-            time.sleep(5)
+            time.sleep(min(backoff, 60))
+            backoff = min(backoff * 2, 300)
