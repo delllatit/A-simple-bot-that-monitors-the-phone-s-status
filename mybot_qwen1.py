@@ -260,7 +260,12 @@ def send_welcome(message):
         "/uptime - مدة تشغيل البوت\n"
         "/status - حالة البوت\n"
         "/admins - قائمة المسؤولين المعتمدين\n"
-        "/help - إظهار هذه الرسالة\n\n"
+        "/help - إظهار هذه الرسالة\n"
+        "/storage - مساحة القرص\n"          # NEW
+        "/cpu - استخدام المعالج والذاكرة\n"  # NEW
+        "/contacts - قائمة جهات الاتصال\n"   # NEW
+        "/call رقم - إجراء مكالمة\n"         # NEW
+        "/uptime - مدة تشغيل البوت\n"
         "🔔 ملاحظة: تنبيهات البطارية تعمل تلقائياً عند 60%, 50%, 40%, 30%"
     )
     bot.reply_to(message, text)
@@ -602,6 +607,253 @@ def send_sms(message):
 
 # ================== التعامل مع الرسائل غير المعروفة ==================
 @bot.message_handler(content_types=["text"])
+# ================== /storage ==================
+@bot.message_handler(commands=["storage"])
+@admin_only
+def get_storage_info(message):
+    """عرض مساحة القرص للمجلد الرئيسي وللتخزين المشترك إن وُجد."""
+    try:
+        targets = [str(Path.home())]
+        shared = Path("/storage/emulated/0")
+        if shared.exists():
+            targets.append(str(shared))
+
+        seen_mounts = set()
+        rows = []
+
+        for target in targets:
+            try:
+                r = subprocess.run(
+                    ["df", "-h", target],
+                    capture_output=True, text=True, timeout=10
+                )
+            except FileNotFoundError:
+                bot.reply_to(message, "❌ أمر df غير موجود على النظام.")
+                logger.error("df غير موجود")
+                return
+
+            if r.returncode != 0:
+                logger.warning("df فشل لـ %s: %s", target, (r.stderr or "").strip())
+                continue
+
+            for line in r.stdout.strip().splitlines()[1:]:
+                cols = line.split()
+                if len(cols) < 6:
+                    continue
+                mounted = " ".join(cols[5:])
+                if mounted in seen_mounts:
+                    continue
+                seen_mounts.add(mounted)
+                rows.append(
+                    f"📂 <b>{html.escape(mounted)}</b>\n"
+                    f"   الكل: {html.escape(cols[1])} | المستخدم: {html.escape(cols[2])}\n"
+                    f"   المتاح: {html.escape(cols[3])} | النسبة: {html.escape(cols[4])}"
+                )
+
+        if not rows:
+            bot.reply_to(message, "❌ تعذر قراءة معلومات التخزين.")
+            return
+
+        report = "💾 <b>مساحة القرص:</b>\n\n" + "\n\n".join(rows)
+        if len(report) > 4000:
+            report = report[:3900] + "\n..."
+        bot.reply_to(message, report, parse_mode="HTML")
+        logger.info("تم جلب مساحة القرص للمستخدم %s", message.from_user.id)
+    except Exception as e:
+        logger.exception("خطأ في جلب مساحة القرص")
+        bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
+
+
+# ================== /cpu ==================
+def _cpu_usage_percent(delay=0.5):
+    """حساب نسبة استخدام CPU من /proc/stat خلال delay ثانية."""
+    def _read():
+        with open("/proc/stat", "r", encoding="utf-8") as f:
+            line = f.readline()
+        parts = line.split()
+        values = [int(x) for x in parts[1:]]
+        idle = values[3] + (values[4] if len(values) > 4 else 0)
+        total = sum(values)
+        return idle, total
+
+    try:
+        i1, t1 = _read()
+        time.sleep(delay)
+        i2, t2 = _read()
+        d_total = t2 - t1
+        d_idle = i2 - i1
+        if d_total <= 0:
+            return None
+        return max(0.0, min(100.0, 100.0 * (1 - d_idle / d_total)))
+    except Exception:
+        return None
+
+
+@bot.message_handler(commands=["cpu"])
+@admin_only
+def get_cpu_info(message):
+    """عرض معلومات المعالج، الحِمل، الاستخدام، والذاكرة."""
+    try:
+        # الأنوية والطراز من /proc/cpuinfo
+        cores = "غير معروف"
+        model = "غير معروف"
+        try:
+            with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
+                cpuinfo = f.read()
+            cores = cpuinfo.count("processor\t:") or cpuinfo.count("processor :") or "غير معروف"
+            for line in cpuinfo.splitlines():
+                if "model name" in line or "Hardware" in line:
+                    if ":" in line:
+                        model = line.split(":", 1)[1].strip()
+                    break
+        except Exception:
+            pass
+
+        # متوسط الحِمل
+        try:
+            with open("/proc/loadavg", "r", encoding="utf-8") as f:
+                load = f.read().strip()
+        except Exception:
+            load = "غير متاح"
+
+        # نسبة الاستخدام الحالية
+        usage = _cpu_usage_percent()
+        usage_str = f"{usage:.1f}%" if usage is not None else "غير متاح"
+
+        # الذاكرة من /proc/meminfo
+        def _kb_to_mb(s):
+            try:
+                return f"{int(s) / 1024:.1f} MB"
+            except (ValueError, TypeError):
+                return "N/A"
+
+        mem_total = mem_avail = mem_free = "N/A"
+        try:
+            with open("/proc/meminfo", "r", encoding="utf-8") as f:
+                for line in f:
+                    if line.startswith("MemTotal:"):
+                        mem_total = _kb_to_mb(line.split()[1])
+                    elif line.startswith("MemAvailable:"):
+                        mem_avail = _kb_to_mb(line.split()[1])
+                    elif line.startswith("MemFree:"):
+                        mem_free = _kb_to_mb(line.split()[1])
+        except Exception:
+            pass
+
+        report = (
+            "🧮 <b>معلومات المعالج والذاكرة:</b>\n\n"
+            f"<b>المعالج:</b>\n"
+            f"- الأنوية: {html.escape(str(cores))}\n"
+            f"- الطراز: {html.escape(model)}\n"
+            f"- الاستخدام الحالي: {html.escape(usage_str)}\n"
+            f"- متوسط الحِمل (1/5/15): {html.escape(load)}\n\n"
+            f"<b>الذاكرة:</b>\n"
+            f"- الكل: {html.escape(mem_total)}\n"
+            f"- المتاح: {html.escape(mem_avail)}\n"
+            f"- الحر: {html.escape(mem_free)}\n\n"
+            f"🕐 {html.escape(time.strftime('%Y-%m-%d %H:%M:%S'))}"
+        )
+        bot.reply_to(message, report, parse_mode="HTML")
+        logger.info("تم جلب معلومات CPU/RAM للمستخدم %s", message.from_user.id)
+    except Exception as e:
+        logger.exception("خطأ في جلب CPU/RAM")
+        bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
+
+
+# ================== /contacts ==================
+@bot.message_handler(commands=["contacts"])
+@admin_only
+def get_contacts(message):
+    """عرض جهات الاتصال (بحد أقصى 100 لتجنب الرسائل الضخمة)."""
+    try:
+        result = subprocess.run(
+            ["termux-contact-list"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            bot.reply_to(message, "❌ تعذر قراءة جهات الاتصال.\n" + detail[:800])
+            logger.warning("فشل termux-contact-list: %s", detail)
+            return
+
+        try:
+            contacts = json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            bot.reply_to(message, f"❌ تعذر تحليل JSON لجهات الاتصال: {e}")
+            logger.warning("JSON غير صالح من termux-contact-list")
+            return
+
+        if not isinstance(contacts, list):
+            bot.reply_to(message, "❌ صيغة غير متوقعة من termux-contact-list.")
+            return
+
+        if not contacts:
+            bot.reply_to(message, "📇 لا توجد جهات اتصال.")
+            return
+
+        MAX_CONTACTS = 100
+        shown = contacts[:MAX_CONTACTS]
+        lines = []
+        for c in shown:
+            if not isinstance(c, dict):
+                continue
+            name = c.get("name", "بدون اسم")
+            number = c.get("number", "بدون رقم")
+            lines.append(
+                f"• <b>{html.escape(str(name))}</b>: <code>{html.escape(str(number))}</code>"
+            )
+
+        header = f"📇 <b>جهات الاتصال ({len(contacts)}):</b>"
+        if len(contacts) > MAX_CONTACTS:
+            header += f"\n(يتم عرض أول {MAX_CONTACTS} فقط)"
+
+        report = header + "\n\n" + "\n".join(lines)
+        if len(report) > 4000:
+            report = report[:3900] + "\n..."
+        bot.reply_to(message, report, parse_mode="HTML")
+        logger.info("تم جلب جهات الاتصال (%d) للمستخدم %s", len(contacts), message.from_user.id)
+    except FileNotFoundError:
+        bot.reply_to(message, "❌ أمر termux-contact-list غير موجود. تأكد من تثبيت Termux:API.")
+        logger.error("termux-contact-list غير موجود")
+    except Exception as e:
+        logger.exception("خطأ في جلب جهات الاتصال")
+        bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
+
+
+# ================== /call ==================
+@bot.message_handler(commands=["call"])
+@admin_only
+def make_call(message):
+    """بدء مكالمة عبر termux-telephony-call."""
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) < 2:
+        bot.reply_to(message, "❌ استخدم الأمر بالشكل التالي:\n/call 966500000000")
+        return
+
+    phone_number = re.sub(r"\s+", "", parts[1])
+    if not re.fullmatch(r"\+?\d{7,15}", phone_number):
+        bot.reply_to(message, "❌ رقم هاتف غير صالح. استخدم الصيغة الدولية مثل: 9665XXXXXXXX")
+        return
+
+    try:
+        result = subprocess.run(
+            ["termux-telephony-call", phone_number],
+            capture_output=True, text=True, timeout=20
+        )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip()
+            bot.reply_to(message, "❌ تعذر إجراء المكالمة.\n" + detail[:800])
+            logger.warning("فشل termux-telephony-call إلى %s: %s", phone_number, detail)
+            return
+
+        bot.reply_to(message, f"📞 تم بدء المكالمة إلى {phone_number}")
+        logger.info("تم بدء مكالمة إلى %s من المستخدم %s", phone_number, message.from_user.id)
+    except FileNotFoundError:
+        bot.reply_to(message, "❌ أمر termux-telephony-call غير موجود. تأكد من تثبيت Termux:API.")
+        logger.error("termux-telephony-call غير موجود")
+    except Exception as e:
+        logger.exception("خطأ في إجراء المكالمة")
+        bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
 def handle_unknown(message):
     # NEW (fix 2): تجاهل صامت لغير المسؤول — يمنع كشف وجود البوت + log spam
     if not is_admin(message):
@@ -638,6 +890,12 @@ if __name__ == "__main__":
             telebot.types.BotCommand("status", "حالة البوت"),
             telebot.types.BotCommand("admins", "قائمة المسؤولين المعتمدين"),
             telebot.types.BotCommand("help", "إظهار قائمة الأوامر"),
+            telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
+            telebot.types.BotCommand("storage", "مساحة القرص"),             # NEW
+            telebot.types.BotCommand("cpu", "استخدام المعالج والذاكرة"),    # NEW
+            telebot.types.BotCommand("contacts", "قائمة جهات الاتصال"),     # NEW
+            telebot.types.BotCommand("call", "إجراء مكالمة"),               # NEW
+            telebot.types.BotCommand("uptime", "مدة تشغيل البوت"),
         ])
     except Exception as e:
         logger.warning("تعذر تسجيل قائمة الأوامر: %s", e)
