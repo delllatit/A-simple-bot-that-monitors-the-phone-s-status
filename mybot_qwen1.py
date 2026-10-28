@@ -11,6 +11,7 @@ import threading
 import datetime
 import atexit       # NEW
 import signal       # NEW
+import shutil
 from pathlib import Path
 import telebot
 from dotenv import load_dotenv
@@ -265,7 +266,7 @@ def send_welcome(message):
         "/cpu - استخدام المعالج والذاكرة\n"  # NEW
         "/contacts - قائمة جهات الاتصال\n"   # NEW
         "/call رقم - إجراء مكالمة\n"         # NEW
-        "/uptime - مدة تشغيل البوت\n"
+
         "🔔 ملاحظة: تنبيهات البطارية تعمل تلقائياً عند 60%, 50%, 40%, 30%"
     )
     bot.reply_to(message, text)
@@ -611,175 +612,81 @@ def send_sms(message):
 @bot.message_handler(commands=["storage"])
 @admin_only
 def get_storage_info(message):
-    """عرض مساحة القرص للمجلد الرئيسي وللتخزين المشترك إن وُجد."""
+    """عرض مساحة القرص باستخدام مكتبة بايثون المدمجة (لا تحتاج df)."""
     try:
         targets = [str(Path.home())]
         shared = Path("/storage/emulated/0")
         if shared.exists():
             targets.append(str(shared))
 
-        seen_mounts = set()
         rows = []
+        seen = set()
 
         for target in targets:
+            if target in seen:
+                continue
+            seen.add(target)
             try:
-                r = subprocess.run(
-                    ["df", "-h", target],
-                    capture_output=True, text=True, timeout=10
-                )
-            except FileNotFoundError:
-                bot.reply_to(message, "❌ أمر df غير موجود على النظام.")
-                logger.error("df غير موجود")
-                return
-
-            if r.returncode != 0:
-                logger.warning("df فشل لـ %s: %s", target, (r.stderr or "").strip())
+                # استخدام shutil.disk_usage بدلاً من df
+                usage = shutil.disk_usage(target)
+            except Exception as e:
+                logger.warning("فشل قراءة المساحة لـ %s: %s", target, e)
                 continue
 
-            for line in r.stdout.strip().splitlines()[1:]:
-                cols = line.split()
-                if len(cols) < 6:
-                    continue
-                mounted = " ".join(cols[5:])
-                if mounted in seen_mounts:
-                    continue
-                seen_mounts.add(mounted)
-                rows.append(
-                    f"📂 <b>{html.escape(mounted)}</b>\n"
-                    f"   الكل: {html.escape(cols[1])} | المستخدم: {html.escape(cols[2])}\n"
-                    f"   المتاح: {html.escape(cols[3])} | النسبة: {html.escape(cols[4])}"
-                )
+            total_gb = usage.total / (1024**3)
+            used_gb = usage.used / (1024**3)
+            free_gb = usage.free / (1024**3)
+            percent = (usage.used / usage.total) * 100 if usage.total else 0
+
+            rows.append(
+                f"📂 <b>{html.escape(target)}</b>\n"
+                f"   الكل: {total_gb:.2f} GB | المستخدم: {used_gb:.2f} GB\n"
+                f"   المتاح: {free_gb:.2f} GB | النسبة: {percent:.1f}%"
+            )
 
         if not rows:
             bot.reply_to(message, "❌ تعذر قراءة معلومات التخزين.")
             return
 
         report = "💾 <b>مساحة القرص:</b>\n\n" + "\n\n".join(rows)
-        if len(report) > 4000:
-            report = report[:3900] + "\n..."
         bot.reply_to(message, report, parse_mode="HTML")
         logger.info("تم جلب مساحة القرص للمستخدم %s", message.from_user.id)
     except Exception as e:
         logger.exception("خطأ في جلب مساحة القرص")
         bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
-
-
-# ================== /cpu ==================
-def _cpu_usage_percent(delay=0.5):
-    """حساب نسبة استخدام CPU من /proc/stat خلال delay ثانية."""
-    def _read():
-        with open("/proc/stat", "r", encoding="utf-8") as f:
-            line = f.readline()
-        parts = line.split()
-        values = [int(x) for x in parts[1:]]
-        idle = values[3] + (values[4] if len(values) > 4 else 0)
-        total = sum(values)
-        return idle, total
-
-    try:
-        i1, t1 = _read()
-        time.sleep(delay)
-        i2, t2 = _read()
-        d_total = t2 - t1
-        d_idle = i2 - i1
-        if d_total <= 0:
-            return None
-        return max(0.0, min(100.0, 100.0 * (1 - d_idle / d_total)))
-    except Exception:
-        return None
-
-
-@bot.message_handler(commands=["cpu"])
-@admin_only
-def get_cpu_info(message):
-    """عرض معلومات المعالج، الحِمل، الاستخدام، والذاكرة."""
-    try:
-        # الأنوية والطراز من /proc/cpuinfo
-        cores = "غير معروف"
-        model = "غير معروف"
-        try:
-            with open("/proc/cpuinfo", "r", encoding="utf-8", errors="ignore") as f:
-                cpuinfo = f.read()
-            cores = cpuinfo.count("processor\t:") or cpuinfo.count("processor :") or "غير معروف"
-            for line in cpuinfo.splitlines():
-                if "model name" in line or "Hardware" in line:
-                    if ":" in line:
-                        model = line.split(":", 1)[1].strip()
-                    break
-        except Exception:
-            pass
-
-        # متوسط الحِمل
-        try:
-            with open("/proc/loadavg", "r", encoding="utf-8") as f:
-                load = f.read().strip()
-        except Exception:
-            load = "غير متاح"
-
-        # نسبة الاستخدام الحالية
-        usage = _cpu_usage_percent()
-        usage_str = f"{usage:.1f}%" if usage is not None else "غير متاح"
-
-        # الذاكرة من /proc/meminfo
-        def _kb_to_mb(s):
-            try:
-                return f"{int(s) / 1024:.1f} MB"
-            except (ValueError, TypeError):
-                return "N/A"
-
-        mem_total = mem_avail = mem_free = "N/A"
-        try:
-            with open("/proc/meminfo", "r", encoding="utf-8") as f:
-                for line in f:
-                    if line.startswith("MemTotal:"):
-                        mem_total = _kb_to_mb(line.split()[1])
-                    elif line.startswith("MemAvailable:"):
-                        mem_avail = _kb_to_mb(line.split()[1])
-                    elif line.startswith("MemFree:"):
-                        mem_free = _kb_to_mb(line.split()[1])
-        except Exception:
-            pass
-
-        report = (
-            "🧮 <b>معلومات المعالج والذاكرة:</b>\n\n"
-            f"<b>المعالج:</b>\n"
-            f"- الأنوية: {html.escape(str(cores))}\n"
-            f"- الطراز: {html.escape(model)}\n"
-            f"- الاستخدام الحالي: {html.escape(usage_str)}\n"
-            f"- متوسط الحِمل (1/5/15): {html.escape(load)}\n\n"
-            f"<b>الذاكرة:</b>\n"
-            f"- الكل: {html.escape(mem_total)}\n"
-            f"- المتاح: {html.escape(mem_avail)}\n"
-            f"- الحر: {html.escape(mem_free)}\n\n"
-            f"🕐 {html.escape(time.strftime('%Y-%m-%d %H:%M:%S'))}"
-        )
-        bot.reply_to(message, report, parse_mode="HTML")
-        logger.info("تم جلب معلومات CPU/RAM للمستخدم %s", message.from_user.id)
-    except Exception as e:
-        logger.exception("خطأ في جلب CPU/RAM")
-        bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
-
-
-# ================== /contacts ==================
+# ================== /contacts =================
 @bot.message_handler(commands=["contacts"])
 @admin_only
 def get_contacts(message):
     """عرض جهات الاتصال (بحد أقصى 100 لتجنب الرسائل الضخمة)."""
     try:
+        # 1. تحديد مسار الأمر بدقة (لتفادي مشكلة tmux)
+        termux_prefix = os.environ.get("PREFIX", "/data/data/com.termux/files/usr")
+        cmd_path = Path(termux_prefix) / "bin" / "termux-contact-list"
+
+        # إذا لم يكن الملف موجوداً، نستخدم الأمر العادي كخيار أخير
+        cmd = str(cmd_path) if cmd_path.exists() else "termux-contact-list"
+
         result = subprocess.run(
-            ["termux-contact-list"],
+            [cmd],
             capture_output=True, text=True, timeout=30
         )
+
+        # 2. إذا فشل الأمر، أظهر الخطأ الحقيقي في تلجرام
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
-            bot.reply_to(message, "❌ تعذر قراءة جهات الاتصال.\n" + detail[:800])
+            bot.reply_to(message, f"❌ تعذر قراءة جهات الاتصال (كود {result.returncode}).\nالسبب:\n{detail[:800]}")
             logger.warning("فشل termux-contact-list: %s", detail)
+            return
+
+        if not result.stdout.strip():
+            bot.reply_to(message, "❌ الأمر نُفذ بنجاح لكن النتيجة فارغة! تأكد من منح تطبيق Termux:API إذن جهات الاتصال.")
             return
 
         try:
             contacts = json.loads(result.stdout)
         except json.JSONDecodeError as e:
-            bot.reply_to(message, f"❌ تعذر تحليل JSON لجهات الاتصال: {e}")
+            bot.reply_to(message, f"❌ تعذر تحليل JSON.\nالناتج الخام:\n{result.stdout[:800]}")
             logger.warning("JSON غير صالح من termux-contact-list")
             return
 
@@ -812,14 +719,13 @@ def get_contacts(message):
             report = report[:3900] + "\n..."
         bot.reply_to(message, report, parse_mode="HTML")
         logger.info("تم جلب جهات الاتصال (%d) للمستخدم %s", len(contacts), message.from_user.id)
+
     except FileNotFoundError:
         bot.reply_to(message, "❌ أمر termux-contact-list غير موجود. تأكد من تثبيت Termux:API.")
         logger.error("termux-contact-list غير موجود")
     except Exception as e:
         logger.exception("خطأ في جلب جهات الاتصال")
         bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
-
-
 # ================== /call ==================
 @bot.message_handler(commands=["call"])
 @admin_only
@@ -895,7 +801,7 @@ if __name__ == "__main__":
             telebot.types.BotCommand("cpu", "استخدام المعالج والذاكرة"),    # NEW
             telebot.types.BotCommand("contacts", "قائمة جهات الاتصال"),     # NEW
             telebot.types.BotCommand("call", "إجراء مكالمة"),               # NEW
-            telebot.types.BotCommand("uptime", "مدة تشغيل البوت"),
+
         ])
     except Exception as e:
         logger.warning("تعذر تسجيل قائمة الأوامر: %s", e)
