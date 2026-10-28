@@ -21,7 +21,7 @@ ADMIN_IDS_RAW = os.getenv("ADMIN_ID", "").strip()
 # دعم قائمة مسؤولين متعددة مفصولة بفواصل: ADMIN_ID="123,456"
 ADMIN_IDS = {int(x) for x in re.split(r"[,\s]+", ADMIN_IDS_RAW) if x.strip().lstrip("-").isdigit()}
 LOG_FILE = os.getenv("BOT_LOG_FILE", str(Path.home() / "bot-logs" / "mybot.log"))
-BATTERY_CHECK_INTERVAL = int(os.getenv("BATTERY_CHECK_INTERVAL", "300"))  # ثوانٍ (افتراضي 5 دقائق)
+BATTERY_CHECK_INTERVAL = int(os.getenv("BATTERY_CHECK_INTERVAL", "1800"))  # ثوانٍ (افتراضي 30 دقائق)
 
 # ================== إعدادات السجل ==================
 LOG_DIR = Path(LOG_FILE).parent
