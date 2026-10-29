@@ -4,6 +4,7 @@ import datetime
 import time
 
 from phone_status_bot.core import config, state
+from phone_status_bot.core.html_utils import send_html_reply
 from phone_status_bot.core.logging_setup import logger
 from phone_status_bot.core.permissions import admin_only
 
@@ -62,7 +63,7 @@ def register(bot):
     @admin_only
     def get_uptime(message):
         uptime_str = format_uptime(BOT_START_TIME)
-        bot.reply_to(message, f"⏳ <b>مدة تشغيل البوت:</b>\n{uptime_str}", parse_mode="HTML")
+        send_html_reply(bot, message, f"⏳ <b>مدة تشغيل البوت:</b>\n{uptime_str}")
         logger.info("تم طلب مدة التشغيل من المستخدم %s", message.from_user.id)
 
     @bot.message_handler(commands=["status"])
@@ -89,7 +90,7 @@ def register(bot):
                 "➕ للإضافة: عدّل ADMIN_ID في ~/.bashrc أو .env بفواصل بين المعرفات،\n"
                 "ثم نفّذ: source ~/.bashrc وأعد تشغيل البوت."
             )
-        bot.reply_to(message, msg, parse_mode="HTML")
+        send_html_reply(bot, message, msg)
         logger.info("تم عرض قائمة المسؤولين للمستخدم %s", message.from_user.id)
 
     # ================== الرسائل غير المعروفة ==================

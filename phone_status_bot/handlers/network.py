@@ -4,6 +4,7 @@ import subprocess
 
 import requests
 
+from phone_status_bot.core.html_utils import send_html_reply
 from phone_status_bot.core.logging_setup import logger
 from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.core.termux import fetch_public_ip
@@ -22,7 +23,7 @@ def register(bot):
         if report is None:
             bot.reply_to(message, "تعذر قراءة بيانات البطارية. تحقق من Termux:API.")
             return
-        bot.reply_to(message, report, parse_mode="HTML")
+        send_html_reply(bot, message, report)
         logger.info("تم جلب معلومات البطارية للمستخدم %s", message.from_user.id)
 
     # ================== /ip ==================
@@ -99,7 +100,7 @@ def register(bot):
         if report == cellular.NO_ACTIVE_WIFI:
             bot.reply_to(message, "لا يوجد اتصال Wi-Fi نشط حالياً.")
             return
-        bot.reply_to(message, report, parse_mode="HTML")
+        send_html_reply(bot, message, report)
         logger.info("تم جلب معلومات الشبكة للمستخدم %s", message.from_user.id)
 
     # ================== /cellular ==================
@@ -114,5 +115,5 @@ def register(bot):
                 "وأن الجهاز يدعم الشريحة/الاتصال الخلوي."
             )
             return
-        bot.reply_to(message, report, parse_mode="HTML")
+        send_html_reply(bot, message, report)
         logger.info("تم جلب المعلومات الخلوية للمستخدم %s", message.from_user.id)
