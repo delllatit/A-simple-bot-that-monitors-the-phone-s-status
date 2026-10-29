@@ -1,4 +1,4 @@
-"""معالجات المعلومات العامة عن البوت: /start /help /uptime /status /admins."""
+"""معالجات المعلومات العامة عن البوت: /start /help /uptime /status /admins + معالج الرسائل غير المعروفة."""
 
 import datetime
 import time
@@ -7,6 +7,7 @@ from phone_status_bot.core import config, state
 from phone_status_bot.core.logging_setup import logger
 from phone_status_bot.core.permissions import admin_only
 
+# تُضبط من main.run() عند بدء التشغيل (لتوحيد مصدر وقت البداية)
 BOT_START_TIME = datetime.datetime.now()
 
 HELP_TEXT = (
@@ -90,3 +91,14 @@ def register(bot):
             )
         bot.reply_to(message, msg, parse_mode="HTML")
         logger.info("تم عرض قائمة المسؤولين للمستخدم %s", message.from_user.id)
+
+    # ================== الرسائل غير المعروفة ==================
+    # يُسجَّل أخيراً ليلتقط فقط ما لم تلتقطه معالجات الأوامر الأخرى
+    @bot.message_handler(content_types=["text"])
+    @admin_only
+    def handle_unknown(message):
+        if message.text and message.text.startswith("/"):
+            uid = message.from_user.id if message.from_user else "unknown"
+            logger.info("أمر غير معروف: %s من المستخدم %s", message.text, uid)
+            bot.reply_to(message, "❓ أمر غير معروف. أرسل /help لعرض القائمة.")
+        # الرسائل النصية العادية تُتجاهل (البوت أوامري فقط)

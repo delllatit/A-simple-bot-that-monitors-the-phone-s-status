@@ -1,4 +1,4 @@
-"""معالجات الشبكة: /ip /whois /network /cellular."""
+"""معالجات الشبكة والحالة: /ip /whois /network /cellular /battery."""
 
 import subprocess
 
@@ -8,11 +8,22 @@ from phone_status_bot.core.logging_setup import logger
 from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.core.termux import fetch_public_ip
 from phone_status_bot.core import state
-from phone_status_bot.services import cellular, whois
+from phone_status_bot.services import battery, cellular, whois
 
 
 def register(bot):
     state.init_bot(bot)
+
+    # ================== /battery ==================
+    @bot.message_handler(commands=["battery"])
+    @admin_only
+    def get_battery_info(message):
+        report = battery.get_battery_report()
+        if report is None:
+            bot.reply_to(message, "تعذر قراءة بيانات البطارية. تحقق من Termux:API.")
+            return
+        bot.reply_to(message, report, parse_mode="HTML")
+        logger.info("تم جلب معلومات البطارية للمستخدم %s", message.from_user.id)
 
     # ================== /ip ==================
     @bot.message_handler(commands=["ip"])
