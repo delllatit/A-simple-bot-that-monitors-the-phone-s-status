@@ -1,28 +1,35 @@
-
-
 # Phone Status Monitor Bot
 
-A simple Telegram bot for Android/Termux that monitors the phone's battery and can report status, network details, GPS location, and take photos.
+بوت Telegram بسيط يعمل على Android عبر Termux لمراقبة حالة الهاتف وقياس بعض المعلومات المهمة. المشروع يسمح لك بمعرفة حالة البطارية، الشبكة، الموقع، التقاط الصور، وبدء التسجيل الصوتي، مع تقييد جميع الأوامر للمسؤول فقط.
 
-## Features
+> ملاحظة مهمة: هذا المشروع يملك صلاحيات حساسة مثل أذونات الكاميرا، الموقع، جهات الاتصال، SMS، والمكالمات. استخدمه فقط على جهازك الخاص أو على أجهزة مرخصة لك، وبأهداف شرعية ومشروعة.
 
-- Battery status and charging state
-- Wi-Fi connection details
-- Device IP information
-- GPS location lookup
-- Camera capture (front or back)
-- Admin-only access control
+## المميزات
 
-## Requirements
+- مراقبة البطارية ودرجة الشحن
+- قراءة معلومات Wi‑Fi
+- قراءة تفاصيل الشبكة الخلوية
+- الحصول على عنوان IP المحلي والعام
+- جلب الموقع الحالي عبر GPS
+- التقاط صورة من الكاميرا الأمامية أو الخلفية
+- قراءة جهات الاتصال
+- إرسال الرسائل SMS
+- إجراء المكالمات
+- تسجيل صوتي مع إيقاف تلقائي
+- مراقبة حالة البوت والوقت التشغيل
+- إدارة المسؤولين من خلال ADMIN_ID
 
+## المتطلبات
+
+- Android مع Termux
+- Termux:API
 - Python 3.8+
-- Termux on Android
-- Termux:API package
-- `pyTelegramBotAPI`
+- Bot Token من Telegram
 
-## Setup
+## تثبيت المتطلبات
 
-1. Install the required package in Termux:
-   ```bash
-   pkg install termux-api
-   pip install pyTelegramBotAPI requests
+### 1) تثبيت Termux:API
+
+```bash
+pkg update && pkg upgrade
+pkg install termux-api git python
