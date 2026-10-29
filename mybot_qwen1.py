@@ -258,6 +258,7 @@ def send_welcome(message):
         "/cellular - قوة الشبكة الخلوية وبيانات الهاتف\n"
         "/location - الموقع الحالي عبر GPS\n"
         "/ip - عنوان IP المحلي والعام\n"
+        "/whois ip - معلومات مالك عنوان IP (netname/descr/org/country)\n"
         "/record - بدأ التسجيل الصوتي\n"
         "/stop - إيقاف التسجيل وإرساله\n"
         "/sms رقم نص - إرسال رسالة SMS\n"
@@ -347,6 +348,102 @@ def get_ip(message):
         logger.exception("فشل في جلب IP")
         # FIX: التفاصيل في اللوج فقط
         bot.reply_to(message, "❌ تعذر جلب عنوان IP. راجع سجل البوت.")
+
+# ================== /whois ==================
+# استخراج الحقول الأساسية من مخرجات whois، مكافئ لـ:
+#   whois <ip> | grep -iE "netname|descr|org-name|country"
+
+WHOIS_FIELD_PATTERN = re.compile(
+    r'^(?:\s*)(netname|descr|org-name|country)\s*:\s*(.+?)\s*$',
+    re.IGNORECASE,
+)
+
+def _extract_whois_fields(raw_output):
+    """تصفية مخرجات whois إلى الحقول المطلوبة فقط مع إزالة التكرار."""
+    results = []
+    seen = set()
+    for line in (raw_output or "").splitlines():
+        match = WHOIS_FIELD_PATTERN.match(line)
+        if not match:
+            continue
+        key = match.group(1).lower()
+        value = match.group(2)
+        # تجاهل القيم الفارغة أو أسطر الحشو مثل country: XX غير المفيدة نادرًا
+        entry = f"{key}: {value}"
+        if entry.lower() not in seen:
+            seen.add(entry.lower())
+            results.append(entry)
+    return results
+
+@bot.message_handler(commands=["whois"])
+@admin_only
+def handle_whois(message):
+    try:
+        parts = (message.text or "").split()
+        if len(parts) < 2:
+            bot.reply_to(
+                message,
+                "الاستخدام: /whois <عنوان IP>\nمثال: /whois 8.8.8.8\n"
+                "إذا لم تُحدد عنواناً سيُستخدم IP العام الحالي للجهاز.",
+            )
+            return
+
+        arg = parts[1].strip()
+        # التحقق من صحة المعرّف المسموح تمريره للأمر (IP/نطاق/مضيف) — منع حقن الأوامر
+        if not re.fullmatch(r'[A-Za-z0-9._:-]+', arg):
+            bot.reply_to(message, "❌ صيغة العنوان غير صحيحة.")
+            return
+
+        target = arg
+        is_public_ip = False
+        if arg.lower() in ("me", "my", "self"):
+            resp = requests.get("https://api.ipify.org", timeout=10)
+            resp.raise_for_status()
+            target = resp.text.strip()
+            is_public_ip = True
+
+        # البحث عن أمر whois (متاح في Termux عبر: pkg install whois)
+        whois_bin = shutil.which("whois")
+        if not whois_bin:
+            bot.reply_to(
+                message,
+                "❌ أمر whois غير مثبت. ثبّته عبر: pkg install whois",
+            )
+            logger.warning("أمر whois غير متوفر على الجهاز")
+            return
+
+        result = subprocess.run(
+            [whois_bin, target],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        raw_output = result.stdout or ""
+        fields = _extract_whois_fields(raw_output)
+
+        header = f"🔎 نتائج whois للعنوان {target}"
+        if is_public_ip:
+            header += " (IP العام الحالي)"
+        if not fields:
+            summary = (result.stderr.strip() or "No matching records found")[:300]
+            bot.reply_to(message, f"{header}\n\nلم يتم العثور على سجلات مطابقة.\n{summary}")
+            logger.info("لا نتائج whois للعنوان %s", target)
+            return
+
+        body = "\n".join(fields)
+        if len(body) > 4000:
+            body = body[:4000] + "\n... (تم اقتطاع النتائج)"
+        bot.reply_to(message, f"{header}\n\n{body}")
+        logger.info("تم تنفيذ whois للعنوان %s للمستخدم %s", target, message.from_user.id)
+    except subprocess.TimeoutExpired:
+        logger.exception("انتهت مهلة أمر whois")
+        bot.reply_to(message, "❌ انتهت مهلة استعلام whois (30 ثانية).")
+    except requests.RequestException:
+        logger.exception("تعذر جلب IP العام لاستعلام whois")
+        bot.reply_to(message, "❌ تعذر تحديد IP العام الحالي. جرّب /whois <عنوان IP>.")
+    except Exception:
+        logger.exception("فشل في تنفيذ استعلام whois")
+        bot.reply_to(message, "❌ تعذر تنفيذ استعلام whois. راجع سجل البوت.")
 
 # ================== /selfie و /photo ==================
 @bot.message_handler(commands=["selfie", "photo"])
@@ -1132,6 +1229,7 @@ if __name__ == "__main__":
             telebot.types.BotCommand("cellular", "قوة الشبكة الخلوية وبيانات الهاتف"),
             telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
             telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),
+            telebot.types.BotCommand("whois", "معلومات مالك عنوان IP (netname/descr/org/country)"),
             telebot.types.BotCommand("record", "بدء التسجيل الصوتي"),
             telebot.types.BotCommand("stop", "إيقاف التسجيل وإرساله"),
             telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
