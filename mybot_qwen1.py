@@ -255,8 +255,10 @@ def send_welcome(message):
         "/photo - تصوير بالكاميرا الخلفية\n"
         "/battery - معلومات البطارية\n"
         "/network - معلومات Wi-Fi\n"
+        "/cellular - قوة الشبكة الخلوية وبيانات الهاتف\n"
         "/location - الموقع الحالي عبر GPS\n"
         "/ip - عنوان IP المحلي والعام\n"
+        "/whois ip - معلومات مالك عنوان IP (netname/descr/org/country)\n"
         "/record - بدأ التسجيل الصوتي\n"
         "/stop - إيقاف التسجيل وإرساله\n"
         "/sms رقم نص - إرسال رسالة SMS\n"
@@ -347,6 +349,102 @@ def get_ip(message):
         # FIX: التفاصيل في اللوج فقط
         bot.reply_to(message, "❌ تعذر جلب عنوان IP. راجع سجل البوت.")
 
+# ================== /whois ==================
+# استخراج الحقول الأساسية من مخرجات whois، مكافئ لـ:
+#   whois <ip> | grep -iE "netname|descr|org-name|country"
+
+WHOIS_FIELD_PATTERN = re.compile(
+    r'^(?:\s*)(netname|descr|org-name|country)\s*:\s*(.+?)\s*$',
+    re.IGNORECASE,
+)
+
+def _extract_whois_fields(raw_output):
+    """تصفية مخرجات whois إلى الحقول المطلوبة فقط مع إزالة التكرار."""
+    results = []
+    seen = set()
+    for line in (raw_output or "").splitlines():
+        match = WHOIS_FIELD_PATTERN.match(line)
+        if not match:
+            continue
+        key = match.group(1).lower()
+        value = match.group(2)
+        # تجاهل القيم الفارغة أو أسطر الحشو مثل country: XX غير المفيدة نادرًا
+        entry = f"{key}: {value}"
+        if entry.lower() not in seen:
+            seen.add(entry.lower())
+            results.append(entry)
+    return results
+
+@bot.message_handler(commands=["whois"])
+@admin_only
+def handle_whois(message):
+    try:
+        parts = (message.text or "").split()
+        if len(parts) < 2:
+            bot.reply_to(
+                message,
+                "الاستخدام: /whois <عنوان IP>\nمثال: /whois 8.8.8.8\n"
+                "إذا لم تُحدد عنواناً سيُستخدم IP العام الحالي للجهاز.",
+            )
+            return
+
+        arg = parts[1].strip()
+        # التحقق من صحة المعرّف المسموح تمريره للأمر (IP/نطاق/مضيف) — منع حقن الأوامر
+        if not re.fullmatch(r'[A-Za-z0-9._:-]+', arg):
+            bot.reply_to(message, "❌ صيغة العنوان غير صحيحة.")
+            return
+
+        target = arg
+        is_public_ip = False
+        if arg.lower() in ("me", "my", "self"):
+            resp = requests.get("https://api.ipify.org", timeout=10)
+            resp.raise_for_status()
+            target = resp.text.strip()
+            is_public_ip = True
+
+        # البحث عن أمر whois (متاح في Termux عبر: pkg install whois)
+        whois_bin = shutil.which("whois")
+        if not whois_bin:
+            bot.reply_to(
+                message,
+                "❌ أمر whois غير مثبت. ثبّته عبر: pkg install whois",
+            )
+            logger.warning("أمر whois غير متوفر على الجهاز")
+            return
+
+        result = subprocess.run(
+            [whois_bin, target],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        raw_output = result.stdout or ""
+        fields = _extract_whois_fields(raw_output)
+
+        header = f"🔎 نتائج whois للعنوان {target}"
+        if is_public_ip:
+            header += " (IP العام الحالي)"
+        if not fields:
+            summary = (result.stderr.strip() or "No matching records found")[:300]
+            bot.reply_to(message, f"{header}\n\nلم يتم العثور على سجلات مطابقة.\n{summary}")
+            logger.info("لا نتائج whois للعنوان %s", target)
+            return
+
+        body = "\n".join(fields)
+        if len(body) > 4000:
+            body = body[:4000] + "\n... (تم اقتطاع النتائج)"
+        bot.reply_to(message, f"{header}\n\n{body}")
+        logger.info("تم تنفيذ whois للعنوان %s للمستخدم %s", target, message.from_user.id)
+    except subprocess.TimeoutExpired:
+        logger.exception("انتهت مهلة أمر whois")
+        bot.reply_to(message, "❌ انتهت مهلة استعلام whois (30 ثانية).")
+    except requests.RequestException:
+        logger.exception("تعذر جلب IP العام لاستعلام whois")
+        bot.reply_to(message, "❌ تعذر تحديد IP العام الحالي. جرّب /whois <عنوان IP>.")
+    except Exception:
+        logger.exception("فشل في تنفيذ استعلام whois")
+        bot.reply_to(message, "❌ تعذر تنفيذ استعلام whois. راجع سجل البوت.")
+
 # ================== /selfie و /photo ==================
 @bot.message_handler(commands=["selfie", "photo"])
 @admin_only
@@ -428,6 +526,203 @@ def get_network_info(message):
     )
     bot.reply_to(message, report, parse_mode="HTML")
     logger.info("تم جلب معلومات الشبكة للمستخدم %s", message.from_user.id)
+
+# ================== /cellular ==================
+
+# تصنيف قوة الإشارة حسب dBm (مقياس RSRP لشبكات LTE/5G)
+def _signal_quality_label(rssi_dbm):
+    try:
+        rssi = int(rssi_dbm)
+    except (TypeError, ValueError):
+        return "غير معروف"
+    if rssi >= -80:
+        return "ممتازة 🟩"
+    elif rssi >= -90:
+        return "جيدة 🟩"
+    elif rssi >= -100:
+        return "متوسطة 🟨"
+    elif rssi >= -110:
+        return "ضعيفة 🟧"
+    else:
+        return "سيئة جداً 🟥"
+
+# تحويل عدد البايتات إلى صيغة مقروءة
+def _format_bytes(num_bytes):
+    try:
+        value = float(num_bytes)
+    except (TypeError, ValueError):
+        return "غير متوفر"
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if value < 1024 or unit == "TB":
+            return f"{value:.2f} {unit}"
+        value /= 1024
+    return f"{value:.2f} TB"
+
+# تقدير نسبة قوة الإشارة من مستوى Android (0-4) عند غياب dBm
+def _level_to_percent(level):
+    try:
+        level = int(level)
+    except (TypeError, ValueError):
+        return None
+    return max(0, min(100, (level + 1) * 20))
+
+# حساب حجم بيانات الهاتف عبر ملفات إحصاءات الواجهة الخلوية في /proc/uid_stat
+# (يعمل على Termux بدون صلاحيات خاصة، ويعطي الاستهلاك منذ آخر تصفير للنظام)
+def _get_cellular_data_usage():
+    usage = {}
+    try:
+        for entry in os.listdir("/proc/uid_stat"):
+            tcp_stat = os.path.join("/proc/uid_stat", entry, "tcp_snd")
+            rx_stat = os.path.join("/proc/uid_stat", entry, "tcp_rcv")
+            if not (os.path.isfile(tcp_stat) and os.path.isfile(rx_stat)):
+                continue
+            try:
+                with open(tcp_stat) as f:
+                    sent = int(f.read().strip() or 0)
+                with open(rx_stat) as f:
+                    received = int(f.read().strip() or 0)
+            except (OSError, ValueError):
+                continue
+            uid = int(entry) if entry.isdigit() else entry
+            stats = usage.get(uid, {"sent": 0, "received": 0})
+            stats["sent"] += sent
+            stats["received"] += received
+            usage[uid] = stats
+    except OSError:
+        # /proc/uid_stat غير متاح على بعض الأجهزة/الأنظمة
+        return None
+    if not usage:
+        return None
+    total_sent = sum(s["sent"] for s in usage.values())
+    total_received = sum(s["received"] for s in usage.values())
+    return {
+        "sent": total_sent,
+        "received": total_received,
+        "total": total_sent + total_received,
+        "by_uid": usage,
+    }
+
+@bot.message_handler(commands=["cellular", "signal"])
+@admin_only
+def get_cellular_info(message):
+    output = run_termux_command(["termux-telephony-cellinfo"])
+    data = parse_json_output(output)
+
+    if not isinstance(data, dict):
+        bot.reply_to(
+            message,
+            "تعذر قراءة معلومات الشبكة الخلوية. تأكد من تثبيت Termux:API ومنح إذن الهاتف، "
+            "وأن الجهاز يدعم الشريحة/الاتصال الخلوي."
+        )
+        logger.warning("تعذر قراءة المعلومات الخلوية: %s", output)
+        return
+
+    cell = data.get("cellInformation") or {}
+    if not isinstance(cell, dict):
+        cell = {}
+
+    all_cells = cell.get("allCellInfo") or []
+    registered_cells = cell.get("registeredCellInfo") or []
+    source_cells = registered_cells or all_cells
+
+    # اختيار الخلية المسجلة الأحدث (الأعلى timestamp) لعرض تفاصيلها
+    best_cell = None
+    if source_cells:
+        try:
+            best_cell = max(source_cells, key=lambda c: c.get("timestamp", 0) if isinstance(c, dict) else 0)
+        except (TypeError, ValueError):
+            best_cell = source_cells[-1] if isinstance(source_cells[-1], dict) else None
+
+    # تحديد نوع الشبكة الحالية
+    network_type = "غير معروف"
+    if isinstance(best_cell, dict):
+        if "lte" in best_cell:
+            network_type = "LTE (4G)"
+        elif "nr" in best_cell:
+            nr = best_cell.get("nr") or {}
+            tac = nr.get("tac")
+            network_type = "NR (5G NSA)" if tac != -1 else "NR (5G)"
+        elif "gsm" in best_cell:
+            network_type = "GSM (2G)"
+        elif "cdma" in best_cell:
+            network_type = "CDMA"
+        elif "wcdma" in best_cell:
+            network_type = "WCDMA (3G)"
+        elif "tdscdma" in best_cell:
+            network_type = "TD-SCDMA (3G)"
+
+    dbm_value = None
+    rsrp = rsrq = sinr = asu = None
+    if isinstance(best_cell, dict):
+        for sub_key in ("lte", "nr", "gsm", "cdma", "wcdma", "tdscdma"):
+            sub = best_cell.get(sub_key)
+            if isinstance(sub, dict):
+                dbm_value = sub.get("dbm")
+                rsrp = sub.get("rsrp")
+                rsrq = sub.get("rsrq")
+                sinr = sub.get("sinr")
+                asu = sub.get("asu")
+                break
+        if dbm_value is None:
+            dbm_value = best_cell.get("dbm")
+
+    quality = _signal_quality_label(dbm_value)
+    if quality == "غير معروف" and isinstance(best_cell, dict) and best_cell.get("level") is not None:
+        percent = _level_to_percent(best_cell.get("level"))
+        if percent is not None:
+            quality = f"تقديرية ({percent}% من مستوى Android)"
+
+    signal_lines = f"- <b>نوع الشبكة:</b> {html.escape(network_type)}\n"
+    if dbm_value is not None:
+        signal_lines += f"- <b>قوة الإشارة:</b> {html.escape(str(dbm_value))} dBm — {quality}\n"
+    else:
+        signal_lines += f"- <b>قوة الإشارة:</b> {quality}\n"
+    if rsrp is not None:
+        signal_lines += f"- <b>RSRP:</b> {html.escape(str(rsrp))} dBm\n"
+    if rsrq is not None:
+        signal_lines += f"- <b>RSRQ:</b> {html.escape(str(rsrq))} dB\n"
+    if sinr is not None:
+        signal_lines += f"- <b>SINR:</b> {html.escape(str(sinr))} dB\n"
+    if asu is not None:
+        signal_lines += f"- <b>ASU:</b> {html.escape(str(asu))}\n"
+
+    display_cells = len(all_cells) if isinstance(all_cells, list) else 0
+    signal_lines += f"- <b>عدد الخلايا المرئية:</b> {display_cells}\n"
+
+    # معلومات المشغل من TelephonyManager
+    tm = data.get("telephonyManagerInformation") or {}
+    if not isinstance(tm, dict):
+        tm = {}
+    operator = tm.get("networkOperatorName") or tm.get("simOperatorName") or "غير متوفر"
+    mcc_mnc = tm.get("networkOperator") or "غير متوفر"
+    service_state = "متصل بالخدمة" if tm.get("serviceState") == 5 else str(tm.get("serviceState", "غير معروف"))
+
+    # بيانات الهاتف
+    usage = _get_cellular_data_usage()
+    if usage:
+        data_section = (
+            "\n📊 <b>بيانات الهاتف (منذ آخر تصفير للنظام):</b>\n"
+            f"- <b>إجمالي الاستخدام:</b> {_format_bytes(usage['total'])}\n"
+            f"- <b>رفع (Sent):</b> {_format_bytes(usage['sent'])}\n"
+            f"- <b>تنزيل (Received):</b> {_format_bytes(usage['received'])}\n"
+            "- <b>ملاحظة:</b> الإحصاءات تشمل حركة مرور التطبيقات عبر الشبكة الخلوية."
+        )
+    else:
+        data_section = (
+            "\n📊 <b>بيانات الهاتف:</b>\n"
+            "- تعذر قراءة إحصاءات البيانات من النظام.\n"
+            "- جرّب استخدام أداة مثل TrafficStats أو راقب الاستهلاك من إعدادات الجهاز."
+        )
+
+    report = (
+        "📡 <b>معلومات الشبكة الخلوية:</b>\n"
+        f"{signal_lines}"
+        f"- <b>المشغل:</b> {html.escape(str(operator))} ({html.escape(str(mcc_mnc))})\n"
+        f"- <b>حالة الخدمة:</b> {html.escape(service_state)}\n"
+        f"{data_section}"
+    )
+    bot.reply_to(message, report, parse_mode="HTML")
+    logger.info("تم جلب المعلومات الخلوية للمستخدم %s", message.from_user.id)
 
 # ================== /location ==================
 def fetch_gps_location(message):
@@ -931,8 +1226,10 @@ if __name__ == "__main__":
             telebot.types.BotCommand("photo", "تصوير بالكاميرا الخلفية"),
             telebot.types.BotCommand("battery", "معلومات البطارية"),
             telebot.types.BotCommand("network", "معلومات Wi-Fi"),
+            telebot.types.BotCommand("cellular", "قوة الشبكة الخلوية وبيانات الهاتف"),
             telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
             telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),
+            telebot.types.BotCommand("whois", "معلومات مالك عنوان IP (netname/descr/org/country)"),
             telebot.types.BotCommand("record", "بدء التسجيل الصوتي"),
             telebot.types.BotCommand("stop", "إيقاف التسجيل وإرساله"),
             telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
