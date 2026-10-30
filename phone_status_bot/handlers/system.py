@@ -1,6 +1,5 @@
 """معالجات النظام المحلي: /storage /cpu /contacts."""
 
-from phone_status_bot.core.html_utils import send_html_reply
 from phone_status_bot.core.logging_setup import logger
 from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.core import state
@@ -19,7 +18,7 @@ def register(bot):
         if report is None:
             bot.reply_to(message, "❌ تعذر قراءة معلومات التخزين.")
             return
-        send_html_reply(bot, message, report)
+        bot.reply_to(message, report, parse_mode="HTML")
         logger.info("تم جلب مساحة القرص للمستخدم %s", message.from_user.id)
 
     # ================== /cpu ==================
@@ -33,7 +32,7 @@ def register(bot):
             logger.exception("خطأ في جلب معلومات المعالج")
             bot.reply_to(message, "❌ حدث خطأ أثناء جلب معلومات المعالج. راجع سجل البوت.")
             return
-        send_html_reply(bot, message, report)
+        bot.reply_to(message, report, parse_mode="HTML")
         logger.info("تم جلب معلومات المعالج للمستخدم %s", message.from_user.id)
 
     # ================== /contacts ==================
@@ -63,5 +62,5 @@ def register(bot):
             return
 
         report = system_info.format_contacts_report(contacts)
-        send_html_reply(bot, message, report)
+        bot.reply_to(message, report, parse_mode="HTML")
         logger.info("تم جلب جهات الاتصال (%d) للمستخدم %s", len(contacts), message.from_user.id)
