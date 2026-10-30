@@ -127,6 +127,11 @@ def _pick_best_cell(cells):
 
 def _detect_network_type(best_cell):
     """تحديد نوع الشبكة الحالية من مفاتيح بيانات الخلية."""
+
+    cell_type = str(best_cell.get("type", "")).lower()
+    if cell_type in NETWORK_TYPES:
+        return NETWORK_TYPES[cell_type]
+
     for key, label in NETWORK_TYPES.items():
         if key in best_cell:
             if key == "nr":
@@ -134,9 +139,8 @@ def _detect_network_type(best_cell):
                 # tac != -1 يعني شبكة غير مستقلة (NSA) تعتمد على LTE
                 return "NR (5G)" if nr.get("tac") == -1 else "NR (5G NSA)"
             return label
+
     return UNKNOWN_LABEL
-
-
 def _extract_signal_metrics(best_cell):
     """استخراج dbm/rsrp/rsrq/sinr/asu من أول تقنية متاحة في الخلية."""
     dbm_value = rsrp = rsrq = sinr = asu = None
@@ -225,21 +229,42 @@ def get_wifi_report():
     )
 
 
+
 def get_cellular_report():
     """إرجاع تقرير HTML كامل للشبكة الخلوية، أو None عند تعذر القراءة."""
     output = run_termux_command(CELL_INFO_COMMAND)
     data = parse_json_output(output)
-    if not isinstance(data, dict):
+
+    if data is None:
         logger.warning("تعذر قراءة المعلومات الخلوية: %s", output)
         return None
 
-    cell = data.get("cellInformation") or {}
-    if not isinstance(cell, dict):
-        cell = {}
+    # دعم الشكل الذي يعيده Android مباشرة: قائمة بالخلايا
+    if isinstance(data, list):
+        all_cells = data
+        registered_cells = [
+            cell for cell in data
+            if isinstance(cell, dict) and cell.get("registered") is True
+        ]
+        source_cells = registered_cells or all_cells
+        tm = {}
 
-    all_cells = cell.get("allCellInfo") or []
-    registered_cells = cell.get("registeredCellInfo") or []
-    source_cells = registered_cells or all_cells
+    # دعم الشكل الآخر الذي يحتوي على معلومات TelephonyManager
+    elif isinstance(data, dict):
+        cell = data.get("cellInformation") or {}
+        if not isinstance(cell, dict):
+            cell = {}
+
+        all_cells = cell.get("allCellInfo") or []
+        registered_cells = cell.get("registeredCellInfo") or []
+        source_cells = registered_cells or all_cells
+
+        tm = data.get("telephonyManagerInformation") or {}
+        if not isinstance(tm, dict):
+            tm = {}
+    else:
+        logger.warning("تنسيق معلومات الشبكة غير مدعوم: %s", type(data))
+        return None
 
     best_cell = _pick_best_cell(source_cells)
     signal_lines = build_signal_lines(best_cell)
@@ -247,14 +272,16 @@ def get_cellular_report():
     display_cells = len(all_cells) if isinstance(all_cells, list) else 0
     signal_lines += f"- <b>عدد الخلايا المرئية:</b> {display_cells}\n"
 
-    # معلومات المشغل من TelephonyManager
-    tm = data.get("telephonyManagerInformation") or {}
-    if not isinstance(tm, dict):
-        tm = {}
-    operator = tm.get("networkOperatorName") or tm.get("simOperatorName") or "غير متوفر"
+    operator = (
+        tm.get("networkOperatorName")
+        or tm.get("simOperatorName")
+        or "غير متوفر"
+    )
     mcc_mnc = tm.get("networkOperator") or "غير متوفر"
-    service_state = "متصل بالخدمة" if tm.get("serviceState") == 5 else str(
-        tm.get("serviceState", "غير معروف")
+
+    service_state = (
+        "متصل بالخدمة" if tm.get("serviceState") == 5
+        else str(tm.get("serviceState", "غير معروف"))
     )
 
     usage = get_cellular_data_usage()
@@ -262,7 +289,8 @@ def get_cellular_report():
     return (
         "📡 <b>معلومات الشبكة الخلوية:</b>\n"
         f"{signal_lines}"
-        f"- <b>المشغل:</b> {html.escape(str(operator))} ({html.escape(str(mcc_mnc))})\n"
+        f"- <b>المشغل:</b> {html.escape(str(operator))} "
+        f"({html.escape(str(mcc_mnc))})\n"
         f"- <b>حالة الخدمة:</b> {html.escape(service_state)}\n"
         f"{build_data_section(usage)}"
     )
