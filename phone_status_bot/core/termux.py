@@ -35,15 +35,15 @@ def run_termux_command(command, timeout=30):
             check=True,
             timeout=timeout,
         )
-        stdout = result.stdout.strip()
-        # بعض أدوات Termux:API تكتب الخطأ في stdout وتخرج بكود 0 — نفحصها هنا
-        if not stdout or _is_error_output(stdout):
-            stderr = (result.stderr or "").strip()
-            if stderr:
-                return f"خطأ في تنفيذ الأمر: {stderr}"
-            if not stdout:
-                return "خطأ: الأمر لم يُرجع أي مخرجات."
-        return stdout
+      stdout = result.stdout.strip()
+
+# لا تعتبر المخرجات الفارغة خطأ؛ بعض الأوامر
+# مثل termux-camera-photo تنجح بإنشاء ملف دون طباعة نص.
+if stdout and _is_error_output(stdout):
+    stderr = (result.stderr or "").strip()
+    return f"خطأ في تنفيذ الأمر: {stderr or stdout}"
+
+return stdout
     except subprocess.TimeoutExpired:
         return f"خطأ: انتهت مهلة تنفيذ الأمر بعد {timeout} ثانية."
     except subprocess.CalledProcessError as e:
