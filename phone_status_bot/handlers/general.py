@@ -17,6 +17,7 @@ HELP_TEXT = (
     "/battery - معلومات البطارية\n"
     "/network - معلومات Wi-Fi\n"
     "/cellular - قوة الشبكة الخلوية وبيانات الهاتف\n"
+    "/ping [host] — فحص اتصال الإنترنت (ICMP + TCP + DNS)\n"
     "/location - الموقع الحالي عبر GPS\n"
     "/ip - عنوان IP المحلي والعام\n"
     "/whois ip - معلومات مالك عنوان IP (netname/descr/org/country)\n"
