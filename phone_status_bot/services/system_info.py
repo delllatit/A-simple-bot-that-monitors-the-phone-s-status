@@ -3,20 +3,16 @@
 import html
 import json
 import os
-import re
 import shutil as _shutil
 import subprocess
 import time
 from pathlib import Path
 
-from phone_status_bot.core.html_utils import truncate_html
 from phone_status_bot.core.logging_setup import logger
 from phone_status_bot.core.termux import resolve_termux_bin
 
 MAX_CONTACTS = 100          # حد أقصى لعرض جهات الاتصال في رسالة واحدة
-
-# أرقام الهاتف المسموح بعرضها: أرقام ورموز الصيغة الدولية فقط (+ - ( ) مساحة)
-PHONE_ALLOWED_RE = re.compile(r"[^+\d()\- \t]")
+MAX_MESSAGE_LENGTH = 4000   # حد طول رسائل Telegram
 CPU_SAMPLE_INTERVAL = 0.5   # فرق القراءتين لحساب نسبة استخدام المعالج
 
 
@@ -181,18 +177,6 @@ def fetch_contacts():
     return contacts
 
 
-def sanitize_phone_number(raw):
-    """تنقية رقم هاتف قبل عرضه داخل وسم <code>.
-
-    يزيل أي رموز غير متوقعة قد تُفسد تنسيق HTML (مثل وسوم أو محارف تحكم)،
-    ويحدّ الطول حتى لا يطغى رقم شاذ على حجم الرسالة.
-    """
-    text = str(raw if raw is not None else "بدون رقم")
-    # إزالة محارف التحكم والأسطر الجديدة التي تفكك بنية السطر
-    text = text.replace("\r", " ").replace("\n", " ")
-    text = PHONE_ALLOWED_RE.sub("", text).strip()
-    return text[:32] if text else "بدون رقم"
-
 def format_contacts_report(contacts):
     """تنسيق قائمة جهات الاتصال كـ HTML مع الحد الأقصى وحذف الزائد."""
     if not contacts:
@@ -204,14 +188,14 @@ def format_contacts_report(contacts):
         if not isinstance(c, dict):
             continue
         name = c.get("name", "بدون اسم")
-        number = sanitize_phone_number(c.get("number", "بدون رقم"))
-        lines.append(f"• <b>{html.escape(str(name))}</b>: <code>{html.escape(number)}</code>")
+        number = c.get("number", "بدون رقم")
+        lines.append(f"• <b>{html.escape(str(name))}</b>: <code>{html.escape(str(number))}</code>")
 
     header = f"📇 <b>جهات الاتصال ({len(contacts)}):</b>"
     if len(contacts) > MAX_CONTACTS:
         header += f"\n(يتم عرض أول {MAX_CONTACTS} فقط)"
 
     report = header + "\n\n" + "\n".join(lines)
-    # اقتطاع آمن: يسدّ الوسوم المفتوحة (مثل <code>) حتى لا ترفض Telegram
-    # تحليل الكيانات بخطأ 400 "Can't find end tag corresponding to start tag"
-    return truncate_html(report)
+    if len(report) > MAX_MESSAGE_LENGTH:
+        report = report[:3900] + "\n..."
+    return report

@@ -115,47 +115,23 @@ def get_cellular_data_usage():
 
 
 def _pick_best_cell(cells):
-    """اختيار أفضل خلية لعرض تفاصيلها.
-
-    القاعدة (بالأولوية): الخلية المسجّلة ذات القراءة الصالحة الأعلى dBm؛
-    فإن لم توجد قراءات صالحة، أي خلية مسجّلة؛ ثم الخلية الأحدث timestamp؛
-    وأخيراً العنصر الأخير. تُتجاهل القيم الشاذة مثل dbm=-3 أو 0 (قراءة غير
-    مكتملة من المودم) لأنها تظهر في السجلات وتعطي تصنيفاً مضللاً "ممتازة".
-    """
+    """اختيار الخلية المسجلة الأحدث (الأعلى timestamp) لعرض تفاصيلها."""
     if not cells:
         return None
-    dicts = [c for c in cells if isinstance(c, dict)]
-    if not dicts:
+    try:
+        return max(cells, key=lambda c: c.get("timestamp", 0) if isinstance(c, dict) else 0)
+    except (TypeError, ValueError):
         last = cells[-1]
         return last if isinstance(last, dict) else None
 
-    registered = [c for c in dicts if c.get("registered")] or dicts
-
-    def valid_dbm(cell):
-        value = _extract_signal_metrics(cell)[0]
-        try:
-            value = int(value)
-        except (TypeError, ValueError):
-            return None
-        # نطاق dBm الواقعي لشبكات الخلوي: -199..-40 تقريباً
-        return value if -200 < value <= -40 else None
-
-    with_signal = [c for c in registered if valid_dbm(c) is not None]
-    if with_signal:
-        return max(with_signal, key=valid_dbm)
-
-    try:
-        return max(registered, key=lambda c: c.get("timestamp", 0))
-    except (TypeError, ValueError):
-        return registered[-1]
-
 
 def _detect_network_type(best_cell):
-    """تحديد نوع الشبكة الحالية من مفاتيح بيانات الخلية.
+    """تحديد نوع الشبكة الحالية من مفاتيح بيانات الخلية."""
 
-    يدعم الشكل الكامل (خلية تحتوي قسماً فرعياً مثل {"lte": {...}}) والشكل
-    المبسّط الذي ترجعه بعض الإصدارات (خلية فيها مفتاح "type" مباشرة).
-    """
+    cell_type = str(best_cell.get("type", "")).lower()
+    if cell_type in NETWORK_TYPES:
+        return NETWORK_TYPES[cell_type]
+
     for key, label in NETWORK_TYPES.items():
         if key in best_cell:
             if key == "nr":
@@ -163,12 +139,8 @@ def _detect_network_type(best_cell):
                 # tac != -1 يعني شبكة غير مستقلة (NSA) تعتمد على LTE
                 return "NR (5G)" if nr.get("tac") == -1 else "NR (5G NSA)"
             return label
-    cell_type = str(best_cell.get("type", "")).lower()
-    if cell_type in NETWORK_TYPES:
-        return NETWORK_TYPES[cell_type]
+
     return UNKNOWN_LABEL
-
-
 def _extract_signal_metrics(best_cell):
     """استخراج dbm/rsrp/rsrq/sinr/asu من أول تقنية متاحة في الخلية."""
     dbm_value = rsrp = rsrq = sinr = asu = None
@@ -257,106 +229,68 @@ def get_wifi_report():
     )
 
 
-def _as_dict(value):
-    """إرجاع value إن كان dict، وإلا dict فارغ (يصلح مخرجات Termux غير المتوقعة)."""
-    return value if isinstance(value, dict) else {}
-
-
-def _cells_from_list(value):
-    """تحويل قائمة عناصر قد تحتوي نصوصاً/أرقاماً إلى قوائم dicts قابلة للتحليل.
-
-    بعض إصدارات termux-telephony-cellinfo تُرجع الخلية كنص خام مثل
-    'dbm:-67,lac:4417,cid:6025,mcc:417,mnc:1' بدل كائن JSON — نفكّكه هنا.
-    """
-    cells = []
-    for item in value or []:
-        if isinstance(item, dict):
-            cells.append(item)
-        elif isinstance(item, str):
-            parsed = {}
-            for part in item.split(","):
-                key, sep, val = part.partition(":")
-                if sep:
-                    key = key.strip()
-                    val = val.strip()
-                    parsed[key] = int(val) if val.lstrip("-").isdigit() else val
-            if parsed:
-                cells.append(parsed)
-    return cells
-
-
-def _normalize_cellular_payload(data):
-    """توحيد أشكال مخرجات termux-telephony-cellinfo إلى (dict بيانات، خلايا).
-
-    الأشكال المرصودة في السجلات:
-      1. dict فيه cellInformation/telephonyManagerInformation (الشكل الكامل).
-      2. مصفوفة dicts لكل خلية: {type, dbm, asu, cid, lac, mcc, mnc, psc}.
-      3. نص خام داخل مصفوفة أو مفصول بفواصل — يفككه _cells_from_list.
-    يرجع (data_dict, cells_list)؛ كلاهما قد يكون فارغاً لكن الشكل صالح.
-    """
-    if isinstance(data, dict):
-        cell = _as_dict(data.get("cellInformation"))
-        all_cells = _cells_from_list(cell.get("allCellInfo"))
-        registered_cells = _cells_from_list(cell.get("registeredCellInfo"))
-        return data, registered_cells or all_cells
-
-    if isinstance(data, list):
-        cells = _cells_from_list(data)
-        # مصفوفة من العناصر غير المفهومة (نصوص بلا أزواج مفتاح:قيمة) → لا بيانات
-        return {}, cells
-
-    return {}, []
-
-
-def _extract_dbm(best_cell):
-    """استخراج قيمة dBm من الخلية مع دعم الأشكال المختلفة."""
-    dbm_value, *_ = _extract_signal_metrics(best_cell)
-    return dbm_value
-
 
 def get_cellular_report():
-    """إرجاع تقرير HTML كامل للشبكة الخلوية، أو None عند تعذر القراءة.
-
-    يدعم شكل المخرجات الكامل (dict مع cellInformation) وكذلك الشكل المبسّط
-    (مصفوفة خلايا مباشرة) الذي ترجعه بعض أجهزة/إصدارات Termux:API، فلا يعود
-    فشل القراءة يُنتج رسالة غامضة أو يستثني المستخدم بخطأ Telegram.
-    """
+    """إرجاع تقرير HTML كامل للشبكة الخلوية، أو None عند تعذر القراءة."""
     output = run_termux_command(CELL_INFO_COMMAND)
     data = parse_json_output(output)
+
     if data is None:
         logger.warning("تعذر قراءة المعلومات الخلوية: %s", output)
         return None
 
-    payload, source_cells = _normalize_cellular_payload(data)
+    # دعم الشكل الذي يعيده Android مباشرة: قائمة بالخلايا
+    if isinstance(data, list):
+        all_cells = data
+        registered_cells = [
+            cell for cell in data
+            if isinstance(cell, dict) and cell.get("registered") is True
+        ]
+        source_cells = registered_cells or all_cells
+        tm = {}
+
+    # دعم الشكل الآخر الذي يحتوي على معلومات TelephonyManager
+    elif isinstance(data, dict):
+        cell = data.get("cellInformation") or {}
+        if not isinstance(cell, dict):
+            cell = {}
+
+        all_cells = cell.get("allCellInfo") or []
+        registered_cells = cell.get("registeredCellInfo") or []
+        source_cells = registered_cells or all_cells
+
+        tm = data.get("telephonyManagerInformation") or {}
+        if not isinstance(tm, dict):
+            tm = {}
+    else:
+        logger.warning("تنسيق معلومات الشبكة غير مدعوم: %s", type(data))
+        return None
 
     best_cell = _pick_best_cell(source_cells)
     signal_lines = build_signal_lines(best_cell)
 
-    display_cells = len(source_cells)
-    if display_cells:
-        signal_lines += f"- <b>عدد الخلايا المرئية:</b> {display_cells}\n"
+    display_cells = len(all_cells) if isinstance(all_cells, list) else 0
+    signal_lines += f"- <b>عدد الخلايا المرئية:</b> {display_cells}\n"
 
-    # معلومات المشغل من TelephonyManager (قد تغيب في الشكل المبسّط)
-    tm = _as_dict(payload.get("telephonyManagerInformation"))
-    operator = tm.get("networkOperatorName") or tm.get("simOperatorName") or "غير متوفر"
+    operator = (
+        tm.get("networkOperatorName")
+        or tm.get("simOperatorName")
+        or "غير متوفر"
+    )
     mcc_mnc = tm.get("networkOperator") or "غير متوفر"
-    service_state = "متصل بالخدمة" if tm.get("serviceState") == 5 else str(
-        tm.get("serviceState", "غير معروف")
+
+    service_state = (
+        "متصل بالخدمة" if tm.get("serviceState") == 5
+        else str(tm.get("serviceState", "غير معروف"))
     )
 
     usage = get_cellular_data_usage()
 
-    # إذا لم نحصل على أي معلومة مفيدة إطلاقاً → نعتبر القراءة متعثرة
-    has_signal = best_cell is not None and _extract_dbm(best_cell if isinstance(best_cell, dict) else {}) is not None
-    has_operator = operator != "غير متوفر"
-    if not has_signal and not has_operator:
-        logger.warning("مخرجات خلوية بلا بيانات مفيدة: %s", output[:800])
-        return None
-
     return (
         "📡 <b>معلومات الشبكة الخلوية:</b>\n"
         f"{signal_lines}"
-        f"- <b>المشغل:</b> {html.escape(str(operator))} ({html.escape(str(mcc_mnc))})\n"
+        f"- <b>المشغل:</b> {html.escape(str(operator))} "
+        f"({html.escape(str(mcc_mnc))})\n"
         f"- <b>حالة الخدمة:</b> {html.escape(service_state)}\n"
         f"{build_data_section(usage)}"
     )
