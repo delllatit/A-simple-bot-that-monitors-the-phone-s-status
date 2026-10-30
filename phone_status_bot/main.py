@@ -24,12 +24,14 @@ from phone_status_bot.core import config, state
 from phone_status_bot.core.logging_setup import logger, setup_logging
 from phone_status_bot.handlers import general, media, network, phone, recording, system
 from phone_status_bot.services import battery, recording as recording_service
+from phone_status_bot.handlers import general, media, network, phone, ping, recording, system
 
 # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
 # (المسجَّل داخل register(general)) أخيراً ليلتقط ما تبقى من نصوص غير معروفة.
 HANDLER_MODULES = (
     media,
     network,
+    ping,
     phone,
     recording,
     system,
@@ -44,6 +46,7 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("battery", "معلومات البطارية"),
     telebot.types.BotCommand("network", "معلومات Wi-Fi"),
     telebot.types.BotCommand("cellular", "قوة الشبكة الخلوية وبيانات الهاتف"),
+    telebot.types.BotCommand("ping", "فحص اتصال الإنترنت"),
     telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
     telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),
     telebot.types.BotCommand("whois", "معلومات مالك عنوان IP (netname/descr/org/country)"),
