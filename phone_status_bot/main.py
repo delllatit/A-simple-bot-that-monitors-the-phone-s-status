@@ -24,6 +24,7 @@ from phone_status_bot.core import config, state
 from phone_status_bot.core.logging_setup import logger, setup_logging
 from phone_status_bot.handlers import general, media, network, phone, recording, system
 from phone_status_bot.services import battery, recording as recording_service
+from phone_status_bot.services.sms_gateway import start_sms_server
 from phone_status_bot.handlers import general, media, network, phone, ping, recording, system
 
 # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
@@ -125,6 +126,8 @@ def run():
     # 4) إنشاء نسخة البوت وحقنها في الحالة المشتركة
     bot = telebot.TeleBot(config.BOT_TOKEN)
     state.init_bot(bot)
+    # تشغيل مستقبل SMS داخل خيط خلفي
+    start_sms_server(bot, config.ADMIN_IDS)
 
     # 5) تسجيل معالجات المجالات
     for module in HANDLER_MODULES:
