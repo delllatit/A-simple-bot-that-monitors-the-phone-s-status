@@ -85,7 +85,7 @@ def register(bot):
 
             # format_report تُرجع قائمة رسائل مقسّمة حسب حد Telegram (4096 حرفاً)
             for chunk in messages:
-                bot.reply_to(message, chunk)
+                bot.reply_to(message, chunk, parse_mode="HTML")
             logger.info(
                 "تم تنفيذ whois للعنوان %s (%d رسالة) للمستخدم %s",
                 target, len(messages), message.from_user.id,
