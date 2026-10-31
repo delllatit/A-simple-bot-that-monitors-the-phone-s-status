@@ -36,7 +36,6 @@ def register(bot):
             logger.info("تم جلب IP للمستخدم %s", message.from_user.id)
         except Exception:
             logger.exception("فشل في جلب IP")
-            # التفاصيل في اللوج فقط
             bot.reply_to(message, "❌ تعذر جلب عنوان IP. راجع سجل البوت.")
 
     # ================== /whois ==================
@@ -64,17 +63,33 @@ def register(bot):
             if arg.lower() in ("me", "my", "self"):
                 target = fetch_public_ip()
                 is_public_ip = True
+                # fetch_public_ip قد يُرجع None بدون رفع استثناء — نتحقق قبل الاستخدام
+                if not target or not whois.is_valid_target(target):
+                    bot.reply_to(
+                        message,
+                        "❌ تعذر تحديد IP العام الحالي. جرّب /whois <عنوان IP>.",
+                    )
+                    logger.warning("fetch_public_ip أعاد قيمة غير صالحة: %r", target)
+                    return
 
-            fields, fallback = whois.run_whois(target)
-            report = whois.format_report(target, fields, is_public_ip)
-            if report is None:
-                bot.reply_to(message, f"🔎 نتائج whois للعنوان {target}\n\n"
-                                      f"لم يتم العثور على سجلات مطابقة.\n{fallback}")
+            raw, fallback = whois.run_whois(target)
+            messages = whois.format_report(target, raw, is_public_ip)
+            if not messages:
+                bot.reply_to(
+                    message,
+                    f"🔎 نتائج whois للعنوان {target}\n\n"
+                    f"لم يتم العثور على سجلات مطابقة.\n{fallback}",
+                )
                 logger.info("لا نتائج whois للعنوان %s", target)
                 return
 
-            bot.reply_to(message, report)
-            logger.info("تم تنفيذ whois للعنوان %s للمستخدم %s", target, message.from_user.id)
+            # format_report تُرجع قائمة رسائل مقسّمة حسب حد Telegram (4096 حرفاً)
+            for chunk in messages:
+                bot.reply_to(message, chunk)
+            logger.info(
+                "تم تنفيذ whois للعنوان %s (%d رسالة) للمستخدم %s",
+                target, len(messages), message.from_user.id,
+            )
         except FileNotFoundError:
             bot.reply_to(message, "❌ أمر whois غير مثبت. ثبّته عبر: pkg install whois")
             logger.warning("أمر whois غير متوفر على الجهاز")
