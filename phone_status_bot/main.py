@@ -25,6 +25,7 @@ from phone_status_bot.core.logging_setup import logger, setup_logging
 from phone_status_bot.services import battery, recording as recording_service
 from phone_status_bot.services.sms_gateway import start_sms_server
 from phone_status_bot.handlers import clipboard, general, media, network, phone, ping, recording, system
+from phone_status_bot.services import battery, events, recording as recording_service
 # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
 # (المسجَّل داخل register(general)) أخيراً ليلتقط ما تبقى من نصوص غير معروفة.
 HANDLER_MODULES = (
@@ -146,6 +147,8 @@ def run():
     _register_commands(bot)
     monitor_thread = threading.Thread(target=battery.battery_monitor, daemon=True)
     monitor_thread.start()
+    events_thread = threading.Thread(target=events.events_monitor, daemon=True)
+    events_thread.start()
 
     # 8) حلقة الاستطلاع الرئيسية
     _poll_with_backoff(bot)

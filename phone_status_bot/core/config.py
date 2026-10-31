@@ -33,6 +33,7 @@ LOG_FILE = os.getenv("BOT_LOG_FILE", str(Path.home() / "bot-logs" / "mybot.log")
 BATTERY_CHECK_INTERVAL = int(os.getenv("BATTERY_CHECK_INTERVAL", "1800"))
 RECORD_MAX_SECONDS = int(os.getenv("RECORD_MAX_SECONDS", "600"))
 RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "3"))
+EVENT_CHECK_INTERVAL = int(os.getenv("EVENT_CHECK_INTERVAL", "15"))
 
 # عتبات تنبيه البطارية (من الأعلى إلى الأدنى)
 BATTERY_THRESHOLDS = [60, 50, 40, 30]
