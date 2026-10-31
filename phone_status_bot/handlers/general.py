@@ -20,6 +20,7 @@ HELP_TEXT = (
     "/ping [host] — فحص اتصال الإنترنت (ICMP + TCP + DNS)\n"
     "/location - الموقع الحالي عبر GPS\n"
     "/ip - عنوان IP المحلي والعام\n"
+    "/hotspot - on/off \n"
     "/whois ip - معلومات مالك عنوان IP (netname/descr/org/country)\n"
     "/record - بدأ التسجيل الصوتي\n"
     "/stop - إيقاف التسجيل وإرساله\n"
