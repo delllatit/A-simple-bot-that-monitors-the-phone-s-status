@@ -145,6 +145,57 @@ def _count_processes():
         return None
 
 
+def _read_cpu_freq_info():
+    """(التردد الحالي، التردد الأقصى) بالـ MHz من /sys.
+
+    يجرّب scaling_* أولاً (تردد الحاكم)، ثم cpuinfo_* (التردد الفعلي للعتاد).
+    """
+    from glob import glob
+
+    def _avg_khz(patterns):
+        for pattern in patterns:
+            total = count = 0
+            for path in glob(pattern):
+                try:
+                    with open(path) as f:
+                        total += int(f.read().strip())
+                        count += 1
+                except (OSError, ValueError):
+                    continue
+            if count:
+                return total / count
+        return None
+
+    cur = _avg_khz([
+        "/sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_cur_freq",
+        "/sys/devices/system/cpu/cpu[0-9]*/cpufreq/cpuinfo_cur_freq",
+    ])
+    mx = _avg_khz([
+        "/sys/devices/system/cpu/cpu[0-9]*/cpufreq/scaling_max_freq",
+        "/sys/devices/system/cpu/cpu[0-9]*/cpufreq/cpuinfo_max_freq",
+    ])
+    return (
+        (cur / 1000.0) if cur is not None else None,
+        (mx / 1000.0) if mx is not None else None,
+    )
+
+
+def _android_sdk():
+    """رقم Android API level، أو None إذا تعذر."""
+    try:
+        result = subprocess.run(
+            ["getprop", "ro.build.version.sdk"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            v = result.stdout.strip()
+            if v.isdigit():
+                return int(v)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return None
+
+
 def get_cpu_report():
     """تقرير HTML عن حالة المعالج والذاكرة — بتنسيق أوضح مع أشرطة ومؤشرات لونية."""
     lines = ["🖥️ <b>حالة المعالج والذاكرة</b>"]
@@ -152,12 +203,13 @@ def get_cpu_report():
     # ---------- المعالج ----------
     cores = _read_cpu_cores()
     load1, load5, load15 = _read_loadavg()
+    cpu_pct = read_cpu_percent()
+    cur_freq, max_freq = _read_cpu_freq_info()
 
     lines.append("")
     lines.append(f"⚙️ <b>المعالج</b> ({cores} {'أنوية' if cores != 1 else 'نواة'})")
 
-    # نسبة الاستخدام اللحظية (فرق قراءتين في /proc/stat)
-    cpu_pct = read_cpu_percent()
+    # قياس الاستخدام اللحظي (يعمل على Android ≤ 8.0 فقط)
     if cpu_pct is not None:
         bar = _progress_bar(cpu_pct)
         icon = _quality_icon(cpu_pct)
@@ -165,8 +217,6 @@ def get_cpu_report():
             f"• الاستخدام الآن: <code>{bar}</code> "
             f"<b>{cpu_pct:.0f}%</b> {icon}"
         )
-    else:
-        lines.append("• الاستخدام الآن: <i>غير متاح</i>")
 
     # متوسط الحمل (loadavg)
     if load1 is not None:
@@ -181,8 +231,23 @@ def get_cpu_report():
             f"• المتوسط (1/5/15): "
             f"<code>{load1:.2f}</code> / <code>{load5:.2f}</code> / <code>{load15:.2f}</code>"
         )
-    else:
-        lines.append("• الحمل: <i>غير متاح</i>")
+
+    # تردد المعالج (متاح على كل الأجهزة تقريباً)
+    if cur_freq is not None:
+        if max_freq and max_freq > 0:
+            freq_pct = min(100.0, cur_freq / max_freq * 100)
+            bar = _progress_bar(freq_pct)
+            icon = _quality_icon(freq_pct)
+            lines.append(
+                f"• التردد: <code>{cur_freq:.0f}</code> / <code>{max_freq:.0f} MHz</code> "
+                f"<code>{bar}</code> <b>{freq_pct:.0f}%</b> {icon}"
+            )
+        else:
+            lines.append(f"• التردد الحالي: <code>~{cur_freq:.0f} MHz</code>")
+
+    # لا شيء متوفر إطلاقاً
+    if cpu_pct is None and load1 is None and cur_freq is None:
+        lines.append("• <i>قياسات المعالج محجوبة من النظام</i>")
 
     # ---------- الذاكرة ----------
     meminfo = _read_meminfo()
@@ -230,7 +295,22 @@ def get_cpu_report():
     procs = _count_processes()
     if procs is not None:
         lines.append("")
-        lines.append(f"🔢 <b>العمليات النشطة:</b> <code>{procs}</code>")
+        if procs < 30:
+            lines.append(
+                f"🔢 <b>العمليات المرئية:</b> <code>{procs}</code> "
+                f"<i>(مقيدة من Android)</i>"
+            )
+        else:
+            lines.append(f"🔢 <b>العمليات النشطة:</b> <code>{procs}</code>")
+
+    # ---------- تنبيه الأجهزة المقيّدة ----------
+    sdk = _android_sdk()
+    if sdk is not None and sdk >= 27 and cpu_pct is None and load1 is None:
+        lines.append("")
+        lines.append(
+            f"ℹ️ <i>Android {sdk} (API {sdk}) يقيّد /proc/loadavg و/proc/stat. "
+            "تُعرض RAM وSwap والتردد فقط.</i>"
+        )
 
     return "\n".join(lines)
 
@@ -256,6 +336,7 @@ def fetch_contacts():
     try:
         contacts = json.loads(result.stdout)
     except json.JSONDecodeError:
+        # الناتج الخام يُسجَّل في اللوج فقط — لا يُعرض للمستخدم
         logger.warning("JSON غير صالح من termux-contact-list: %s", result.stdout[:800])
         raise RuntimeError("invalid_json")
 
