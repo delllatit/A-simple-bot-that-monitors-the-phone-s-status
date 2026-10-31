@@ -1,0 +1,15 @@
+"""تشغيل/إيقاف نقطة الاتصال عبر MacroDroid (Intent broadcast)."""
+
+from phone_status_bot.core.termux import resolve_termux_bin, run_termux_command
+
+ACTION_ON = "hotspot.on"
+ACTION_OFF = "hotspot.off"
+
+
+def set_hotspot(enable: bool) -> bool:
+    """يرسل broadcast لـ MacroDroid. True = انرسل الأمر (مو ضمان إنه اشتغل)."""
+    action = ACTION_ON if enable else ACTION_OFF
+    out = run_termux_command(
+        [resolve_termux_bin("am"), "broadcast", "-a", action], timeout=10
+    )
+    return not out.startswith("خطأ")

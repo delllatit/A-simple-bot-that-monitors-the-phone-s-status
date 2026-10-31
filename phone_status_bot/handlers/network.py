@@ -8,8 +8,7 @@ from phone_status_bot.core.logging_setup import logger
 from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.core.termux import fetch_public_ip
 from phone_status_bot.core import state
-from phone_status_bot.services import battery, cellular, whois
-
+from phone_status_bot.services import battery, cellular, hotspot, whois
 
 def register(bot):
     state.init_bot(bot)
@@ -131,3 +130,20 @@ def register(bot):
             return
         bot.reply_to(message, report, parse_mode="HTML")
         logger.info("تم جلب المعلومات الخلوية للمستخدم %s", message.from_user.id)
+
+            # ================== /hotspot ==================
+    @bot.message_handler(commands=["hotspot"])
+    @admin_only
+    def handle_hotspot(message):
+        parts = (message.text or "").split()
+        arg = parts[1].lower() if len(parts) > 1 else ""
+        if arg not in ("on", "off"):
+            bot.reply_to(message, "الاستخدام: /hotspot on أو /hotspot off")
+            return
+
+        ok = hotspot.set_hotspot(arg == "on")
+        if ok:
+            bot.reply_to(message, "📶 انرسل أمر " + ("التشغيل" if arg == "on" else "الإيقاف") + " لـ MacroDroid.")
+        else:
+            bot.reply_to(message, "❌ فشل إرسال الأمر. راجع سجل البوت.")
+        logger.info("hotspot %s من المستخدم %s", arg, message.from_user.id)
