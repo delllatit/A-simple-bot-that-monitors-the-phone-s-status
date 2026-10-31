@@ -55,18 +55,8 @@ def get_storage_report():
 
 # ==================== المعالج والذاكرة ====================
 
-def read_loadavg():
-    """قراءة متوسط الحمل (1/5/15 دقيقة) من /proc/loadavg."""
-    try:
-        with open("/proc/loadavg") as f:
-            parts = f.read().split()
-        return parts[0], parts[1], parts[2]
-    except (OSError, IndexError):
-        return "N/A", "N/A", "N/A"
-
-
 def read_cpu_percent(interval=CPU_SAMPLE_INTERVAL):
-    """نسبة استخدام المعالج من فرق قراءتين في /proc/stat، أو None عند التعذر."""
+    """نسبة استخدام المعالج اللحظية من فرق قراءتين في /proc/stat، أو None."""
     def read_times():
         with open("/proc/stat") as f:
             fields = f.readline().split()[1:]
@@ -86,63 +76,161 @@ def read_cpu_percent(interval=CPU_SAMPLE_INTERVAL):
     return None
 
 
-def read_meminfo():
-    """قراءة MemTotal/MemAvailable/SwapTotal/SwapFree بالكيلوبايت من /proc/meminfo."""
-    keys = {"MemTotal", "MemAvailable", "SwapTotal", "SwapFree"}
-    values = {}
+def _progress_bar(percent, width=10):
+    """شريط تقدم نصي بمحاذاة ثابتة."""
+    percent = max(0, min(100, percent))
+    filled = round(percent / 100 * width)
+    return "▓" * filled + "░" * (width - filled)
+
+
+def _quality_icon(percent):
+    """أيقونة لونية حسب نسبة الاستهلاك."""
+    if percent < 50:
+        return "🟩"
+    if percent < 75:
+        return "🟨"
+    if percent < 90:
+        return "🟧"
+    return "🟥"
+
+
+def _format_mb(kb):
+    """تحويل KB إلى MB بصيغة مقروءة."""
+    return f"{kb / 1024:.0f} MB"
+
+
+def _read_loadavg():
+    """قراءة متوسط الحمل من /proc/loadavg مع fallback إلى os.getloadavg()."""
+    try:
+        with open("/proc/loadavg") as f:
+            parts = f.read().split()
+        return float(parts[0]), float(parts[1]), float(parts[2])
+    except (OSError, ValueError, IndexError):
+        pass
+    try:
+        return os.getloadavg()
+    except (OSError, AttributeError):
+        return None, None, None
+
+
+def _read_cpu_cores():
+    """عدد أنوية المعالج من /proc/cpuinfo، مع fallback إلى os.cpu_count()."""
+    try:
+        with open("/proc/cpuinfo") as f:
+            return sum(1 for line in f if line.startswith("processor"))
+    except OSError:
+        return os.cpu_count() or 1
+
+
+def _read_meminfo():
+    """قراءة قيم /proc/meminfo إلى dict (كيلوبايت)."""
+    info = {}
     try:
         with open("/proc/meminfo") as f:
             for line in f:
                 key, _, val = line.partition(":")
-                if key in keys:
-                    num = val.strip().split(" ")[0]
-                    if num.isdigit():
-                        values[key] = int(num)
+                parts = val.strip().split()
+                if parts and parts[0].isdigit():
+                    info[key.strip()] = int(parts[0])
     except OSError:
-        pass
-    return values
+        return None
+    return info or None
 
 
-def count_processes():
-    """عدد العمليات الجارية من /proc، أو None عند التعذر."""
+def _count_processes():
+    """عدد العمليات النشطة (مدخلات رقمية في /proc)."""
     try:
-        return sum(1 for p in Path("/proc").iterdir() if p.name.isdigit())
+        return sum(1 for e in os.listdir("/proc") if e.isdigit())
     except OSError:
         return None
 
 
 def get_cpu_report():
-    """تقرير HTML لحالة المعالج والذاكرة وعدد العمليات."""
-    load1, load5, load15 = read_loadavg()
-    cpu_count = os.cpu_count() or 1
-    cpu_percent = read_cpu_percent()
-    mem = read_meminfo()
+    """تقرير HTML عن حالة المعالج والذاكرة — بتنسيق أوضح مع أشرطة ومؤشرات لونية."""
+    lines = ["🖥️ <b>حالة المعالج والذاكرة</b>"]
 
-    lines = ["🖥️ <b>حالة المعالج والذاكرة:</b>", ""]
+    # ---------- المعالج ----------
+    cores = _read_cpu_cores()
+    load1, load5, load15 = _read_loadavg()
 
-    cpu_line = f"- <b>الحمل (1/5/15 دقيقة):</b> {load1} / {load5} / {load15} ({cpu_count} نواة)"
-    if cpu_percent is not None:
-        cpu_line += f"\n- <b>استخدام المعالج:</b> {cpu_percent:.1f}%"
-    lines.append(cpu_line)
+    lines.append("")
+    lines.append(f"⚙️ <b>المعالج</b> ({cores} {'أنوية' if cores != 1 else 'نواة'})")
 
-    mem_total_kb = mem.get("MemTotal")
-    mem_avail_kb = mem.get("MemAvailable")
-    if mem_total_kb and mem_avail_kb is not None:
-        used_mb = (mem_total_kb - mem_avail_kb) / 1024
-        total_mb = mem_total_kb / 1024
-        pct = (used_mb / total_mb * 100) if total_mb else 0
-        lines.append(f"- <b>الذاكرة المستخدمة:</b> {used_mb:.0f} MB من {total_mb:.0f} MB ({pct:.1f}%)")
+    # نسبة الاستخدام اللحظية (فرق قراءتين في /proc/stat)
+    cpu_pct = read_cpu_percent()
+    if cpu_pct is not None:
+        bar = _progress_bar(cpu_pct)
+        icon = _quality_icon(cpu_pct)
+        lines.append(
+            f"• الاستخدام الآن: <code>{bar}</code> "
+            f"<b>{cpu_pct:.0f}%</b> {icon}"
+        )
     else:
-        lines.append("- <b>الذاكرة:</b> غير متاحة")
+        lines.append("• الاستخدام الآن: <i>غير متاح</i>")
 
-    swap_total_kb = mem.get("SwapTotal")
-    if swap_total_kb:
-        swap_used_mb = (swap_total_kb - (mem.get("SwapFree") or 0)) / 1024
-        lines.append(f"- <b>Swap:</b> {swap_used_mb:.0f} MB من {swap_total_kb / 1024:.0f} MB")
+    # متوسط الحمل (loadavg)
+    if load1 is not None:
+        load_pct = min(100.0, load1 / cores * 100)
+        bar = _progress_bar(load_pct)
+        icon = _quality_icon(load_pct)
+        lines.append(
+            f"• الحمل: <code>{load1:.2f}</code> → "
+            f"<code>{bar}</code> <b>{load_pct:.0f}%</b> {icon}"
+        )
+        lines.append(
+            f"• المتوسط (1/5/15): "
+            f"<code>{load1:.2f}</code> / <code>{load5:.2f}</code> / <code>{load15:.2f}</code>"
+        )
+    else:
+        lines.append("• الحمل: <i>غير متاح</i>")
 
-    proc_count = count_processes()
-    if proc_count is not None:
-        lines.append(f"- <b>عدد العمليات:</b> {proc_count}")
+    # ---------- الذاكرة ----------
+    meminfo = _read_meminfo()
+    lines.append("")
+
+    if meminfo and meminfo.get("MemTotal"):
+        total_kb = meminfo["MemTotal"]
+        avail_kb = meminfo.get("MemAvailable") or meminfo.get("MemFree", 0)
+        used_kb = total_kb - avail_kb
+
+        used_pct = used_kb / total_kb * 100
+        bar = _progress_bar(used_pct)
+        icon = _quality_icon(used_pct)
+
+        lines.append("💾 <b>الذاكرة RAM</b>")
+        lines.append(f"• <code>{bar}</code> <b>{used_pct:.1f}%</b> {icon}")
+        lines.append(
+            f"• المستخدمة: <code>{_format_mb(used_kb)}</code> "
+            f"من <code>{_format_mb(total_kb)}</code>"
+        )
+        lines.append(f"• الحرة: <code>{_format_mb(avail_kb)}</code>")
+    else:
+        lines.append("💾 <b>الذاكرة RAM</b>")
+        lines.append("• <i>غير متاح</i>")
+
+    # ---------- Swap ----------
+    if meminfo:
+        swap_total = meminfo.get("SwapTotal", 0)
+        swap_free = meminfo.get("SwapFree", 0)
+        if swap_total > 0:
+            swap_used = swap_total - swap_free
+            swap_pct = swap_used / swap_total * 100
+            bar = _progress_bar(swap_pct)
+            icon = _quality_icon(swap_pct)
+
+            lines.append("")
+            lines.append("🔄 <b>Swap</b>")
+            lines.append(f"• <code>{bar}</code> <b>{swap_pct:.1f}%</b> {icon}")
+            lines.append(
+                f"• المستخدم: <code>{_format_mb(swap_used)}</code> "
+                f"من <code>{_format_mb(swap_total)}</code>"
+            )
+
+    # ---------- العمليات ----------
+    procs = _count_processes()
+    if procs is not None:
+        lines.append("")
+        lines.append(f"🔢 <b>العمليات النشطة:</b> <code>{procs}</code>")
 
     return "\n".join(lines)
 
@@ -168,7 +256,6 @@ def fetch_contacts():
     try:
         contacts = json.loads(result.stdout)
     except json.JSONDecodeError:
-        # الناتج الخام يُسجَّل في اللوج فقط — لا يُعرض للمستخدم
         logger.warning("JSON غير صالح من termux-contact-list: %s", result.stdout[:800])
         raise RuntimeError("invalid_json")
 
