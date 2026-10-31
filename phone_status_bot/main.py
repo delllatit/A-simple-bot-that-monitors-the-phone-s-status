@@ -26,6 +26,7 @@ from phone_status_bot.handlers import general, media, network, phone, recording,
 from phone_status_bot.services import battery, recording as recording_service
 from phone_status_bot.services.sms_gateway import start_sms_server
 from phone_status_bot.handlers import general, media, network, phone, ping, recording, system
+from phone_status_bot.handlers import clipboard
 
 # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
 # (المسجَّل داخل register(general)) أخيراً ليلتقط ما تبقى من نصوص غير معروفة.
@@ -36,6 +37,7 @@ HANDLER_MODULES = (
     phone,
     recording,
     system,
+    clipboard,
     general,
 )
 
@@ -62,6 +64,7 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("cpu", "استخدام المعالج والذاكرة"),
     telebot.types.BotCommand("contacts", "قائمة جهات الاتصال"),
     telebot.types.BotCommand("call", "إجراء مكالمة"),
+    telebot.types.BotCommand("clipboard", "حفظ نص في حافظة الهاتف"),
 ]
 
 
