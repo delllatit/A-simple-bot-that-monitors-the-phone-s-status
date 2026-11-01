@@ -127,6 +127,7 @@ def run():
 
     # 4) إنشاء نسخة البوت وحقنها في الحالة المشتركة
     bot = telebot.TeleBot(config.BOT_TOKEN)
+    telebot.apihelper.SESSION_TIME_TO_LIVE = 0  # اتصال جديد لكل طلب (يتجنب الاتصال الميت بعد تبدّل الشبكة)
     state.init_bot(bot)
     # تشغيل مستقبل SMS داخل خيط خلفي
     start_sms_server(bot, config.ADMIN_IDS)
