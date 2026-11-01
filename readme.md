@@ -3,6 +3,8 @@
 
 A simple Telegram bot designed to run on Android devices via Termux. It allows you to monitor the phone's status and collect useful device information such as battery level, network details, location, IP information, and media related data.
 
+> **Personal bot model — not a public service.** This project is a *template*, not a hosted bot. It is not meant for general public use: every user clones the repository and creates **their own private bot** for **their own device**, with their own `TELEGRAM_BOT_TOKEN` (from @BotFather) and their own `ADMIN_ID`. The bot only answers admin IDs listed in your `.env`; everyone else is rejected. No credentials, tokens, or secrets are shared between installations — never commit your real `.env` to Git.
+
 This project is intended for educational, testing, and authorized device monitoring use cases only. It interacts with sensitive Android features, so it must be used responsibly and only on devices you own or are explicitly authorized to monitor.
 
 > Important: This project can access sensitive permissions such as camera, GPS, contacts, SMS, calls, and microphone. Use it only with proper consent and in compliance with local laws and privacy policies.

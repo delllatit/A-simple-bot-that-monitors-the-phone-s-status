@@ -8,6 +8,8 @@
 - BATTERY_CHECK_INTERVAL: فترة مراقبة البطارية بالثواني (افتراضي: 1800)
 - RECORD_MAX_SECONDS   : الحد الأقصى لمدة التسجيل الصوتي (افتراضي: 600)
 - RATE_LIMIT_WINDOW    : النافذة الزمنية لحد الطلبات لكل مستخدم بالثواني (افتراضي: 3)
+- SMS_SECRET           : المفتاح السري لبوابة استقبال SMS (اختياري؛ يُولَّد عشوائياً إن غاب)
+- SMS_GATEWAY_PORT     : منفذ بوابة استقبال SMS (افتراضي: 8765، مربوط على 127.0.0.1 فقط)
 """
 
 import os
@@ -34,6 +36,10 @@ BATTERY_CHECK_INTERVAL = int(os.getenv("BATTERY_CHECK_INTERVAL", "1800"))
 RECORD_MAX_SECONDS = int(os.getenv("RECORD_MAX_SECONDS", "600"))
 RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "3"))
 EVENT_CHECK_INTERVAL = int(os.getenv("EVENT_CHECK_INTERVAL", "15"))
+
+# بوابة استقبال SMS (تعمل على loopback فقط في الوضع الافتراضي)
+SMS_SECRET = os.getenv("SMS_SECRET", "").strip()
+SMS_GATEWAY_PORT = int(os.getenv("SMS_GATEWAY_PORT", "8765"))
 
 # عتبات تنبيه البطارية (من الأعلى إلى الأدنى)
 BATTERY_THRESHOLDS = [60, 50, 40, 30]
