@@ -1,13 +1,51 @@
+import html
 import hmac
 import logging
+import re
 import secrets
 import threading
+import time
+from collections import deque
 
 from flask import Flask, request, jsonify
 
 from phone_status_bot.core import config
 
 logger = logging.getLogger("telegram_bot")
+
+# حد عدد الطلبات (rate limiting) — حتى على loopback، أي عملية محلية قادرة على
+# إرسال رسائل SMS قد تُغرق البوت وتعلّق حساب Telegram (حد 40 رسالة/دقيقة).
+RATE_WINDOW_SECONDS = int(getattr(config, "SMS_RATE_WINDOW", 60))
+RATE_MAX_REQUESTS = int(getattr(config, "SMS_RATE_MAX", 10))
+# أقصى طول لنص الرسالة/المرسل قبل الاقتطاع — يمنع رسائل ضخمة وDoS بسيط
+MAX_FIELD_LEN = 3000
+
+_rate_lock = threading.Lock()
+_rate_hits = deque()  # طوابع زمنية للطلبات المقبولة داخل النافذة
+
+
+def _rate_limited():
+    """يعيد True إذا تجاوزت الطلبات الحد المسموح داخل النافذة الزمنية."""
+    now = time.monotonic()
+    with _rate_lock:
+        while _rate_hits and now - _rate_hits[0] > RATE_WINDOW_SECONDS:
+            _rate_hits.popleft()
+        if len(_rate_hits) >= RATE_MAX_REQUESTS:
+            return True
+        _rate_hits.append(now)
+        return False
+
+
+_HOSTNAME_RE = re.compile(r"^[A-Za-z0-9.\-_:]{1,253}$")
+
+
+def _safe_host(value):
+    """يتحقق أن القيمة اسم مضيف/IPv4 صالح فقط — يمنع حقن وسوم Markdown/HTML
+    أو أوامر عبر وسيط host في /ping."""
+    value = (value or "").strip()
+    if not _HOSTNAME_RE.match(value):
+        return None
+    return value
 
 # المفتاح السري يُقرأ من البيئة/ملف .env (لا يُخزَّن داخل الكود المصدري).
 # لماذا؟ لأن المشروع نموذج مفتوح يأخذه كل مستخدم لينشئ بوتاً خاصاً به على
@@ -45,6 +83,15 @@ def register_sms_routes(bot, admin_ids):
     @app.route("/sms", methods=["POST"])
     def receive_sms():
 
+        # حد الطلبات قبل أي معالجة — يمنع الإغراق المحلي وتعليق حساب Telegram
+        if _rate_limited():
+            logger.warning(
+                "SMS Gateway: تجاوز حد الطلبات (%s طلب/%s ثانية) — رفض الطلب",
+                RATE_MAX_REQUESTS,
+                RATE_WINDOW_SECONDS,
+            )
+            return jsonify({"error": "Rate limit exceeded"}), 429
+
         data = request.get_json(silent=True) or request.form
 
         provided = str(data.get("key", ""))
@@ -53,23 +100,25 @@ def register_sms_routes(bot, admin_ids):
             logger.warning("SMS Gateway: محاولة وصول بمفتاح غير صحيح")
             return jsonify({"error": "Unauthorized"}), 401
 
-        sender = str(data.get("sender", "Unknown")).strip()
-        message = str(data.get("message", "")).strip()
+        sender = str(data.get("sender", "Unknown")).strip()[:200]
+        message = str(data.get("message", "")).strip()[:MAX_FIELD_LEN]
 
         if not message:
             return jsonify({"error": "Empty message"}), 400
 
+        # تهريب HTML — بدون هذا يستطيع مصدر SMS (أو أي عملية محلية صالحة
+        # بالمفتاح) حقن وسوم <b>/<a href=...> في تنبيهات المسؤولين.
         text = (
             "📩 رسالة SMS جديدة\n\n"
-            f"👤 المرسل: {sender}\n"
-            f"📝 الرسالة:\n{message}"
+            f"👤 المرسل: {html.escape(sender)}\n"
+            f"📝 الرسالة:\n{html.escape(message)}"
         )
 
         sent = 0
 
         for admin_id in admin_ids:
             try:
-                bot.send_message(admin_id, text)
+                bot.send_message(admin_id, text, parse_mode="HTML")
                 sent += 1
             except Exception:
                 logger.exception(

@@ -38,8 +38,13 @@ RATE_LIMIT_WINDOW = int(os.getenv("RATE_LIMIT_WINDOW", "3"))
 EVENT_CHECK_INTERVAL = int(os.getenv("EVENT_CHECK_INTERVAL", "15"))
 
 # بوابة استقبال SMS (تعمل على loopback فقط في الوضع الافتراضي)
+# ملاحظة: التوكن والمفتاح يُقرأان من البيئة — إذا كنت تصدّرهما من ~/.bashrc
+# عبر export فلن يحتاج المشروع ملف .env إطلاقاً (load_dotenv لا يستبدل القيم الموجودة).
 SMS_SECRET = os.getenv("SMS_SECRET", "").strip()
 SMS_GATEWAY_PORT = int(os.getenv("SMS_GATEWAY_PORT", "8765"))
+# حد الطلبات للبوابة: عدد الطلبات الأقصى داخل النافذة الزمنية (بالثواني)
+SMS_RATE_MAX = int(os.getenv("SMS_RATE_MAX", "10"))
+SMS_RATE_WINDOW = int(os.getenv("SMS_RATE_WINDOW", "60"))
 
 # عتبات تنبيه البطارية (من الأعلى إلى الأدنى)
 BATTERY_THRESHOLDS = [60, 50, 40, 30]

@@ -27,6 +27,15 @@ TELEGRAM_MESSAGE_LIMIT = 4096
 SAFE_MESSAGE_LIMIT = 4000
 TRUNCATION_SUFFIX = "\n… (تم الاقتطاع)"
 
+
+def escape_html(text):
+    """تهريب كامل لمحارف HTML (&, <, >) — إلزامي لأي نص يدخل رسالة HTML.
+
+    يُستخدم لبيانات المستخدم والمرسلين وأسماء الملفات ومخرجات الأوامر قبل
+    تضمينها في قوالب HTML، لمنع حقن وسوم أو روابط مزيفة في رسائل المسؤولين.
+    """
+    return _html.escape(str(text), quote=True)
+
 # الوسوم التي يدعمها Telegram في صيغة HTML
 _ALLOWED_TAGS = ("b", "i", "u", "s", "span", "tg-spoiler", "code", "pre", "a", "blockquote")
 

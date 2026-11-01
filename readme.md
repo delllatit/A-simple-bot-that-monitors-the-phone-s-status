@@ -58,21 +58,43 @@ pip install -r requirements.txt
 
 ## Configuration
 
-Create a `.env` file in the project root and add the following values:
+The bot reads all settings from environment variables. Two supported ways:
+
+**Option A — `~/.bashrc` (recommended for Termux personal setups):**
+Keep secrets out of the repository entirely. Create a private file and source it:
+
+```bash
+# ~/.bot_secrets  (chmod 600)
+export TELEGRAM_BOT_TOKEN="your-token-from-botfather"
+export ADMIN_ID="your-telegram-id"
+export SMS_SECRET="$(python -c 'import secrets; print(secrets.token_hex(16))')"  # generate once, then hardcode the value
+```
+
+```bash
+chmod 600 ~/.bot_secrets
+echo 'source ~/.bot_secrets' >> ~/.bashrc
+```
+
+**Option B — `.env` file:** create `.env` in the project root (never commit it):
 
 ```env
 TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
 ADMIN_ID=YOUR_ADMIN_TELEGRAM_ID
+SMS_SECRET=unique_random_hex_per_installation
 BOT_LOG_FILE=/data/data/com.termux/files/home/bot-logs/mybot.log
 BATTERY_CHECK_INTERVAL=1800
 RECORD_MAX_SECONDS=600
 RATE_LIMIT_WINDOW=3
+SMS_RATE_MAX=10
+SMS_RATE_WINDOW=60
 ```
 
 ### Configuration Notes
 
 - `TELEGRAM_BOT_TOKEN`: Your Telegram bot token from BotFather
 - `ADMIN_ID`: One or more admin Telegram IDs separated by commas
+- `SMS_SECRET`: Shared key for the local SMS gateway (loopback only). If unset, a random key is generated per run and printed to the log.
+- `SMS_RATE_MAX` / `SMS_RATE_WINDOW`: max SMS gateway requests per window (default 10/60s) — protects your Telegram account from local flooding.
 - `BOT_LOG_FILE`: Log file path
 - `BATTERY_CHECK_INTERVAL`: Battery monitoring interval in seconds
 - `RECORD_MAX_SECONDS`: Max audio recording duration

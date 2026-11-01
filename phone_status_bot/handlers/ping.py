@@ -1,33 +1,28 @@
 """معالج أمر /ping لفحص اتصال الإنترنت."""
 
-from phone_status_bot.core import config
 from phone_status_bot.core.logging_setup import logger
+from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.services.ping_service import (
     check_dns,
     check_icmp,
     check_tcp,
 )
-
-
-def _is_admin(user_id):
-    """فلتر مسؤول — عدّله ليطابق نمط بقية المعالجات في مشروعك."""
-    admin_id = getattr(config, "ADMIN_ID", None)
-    admin_ids = getattr(config, "ADMIN_IDS", None)
-    if admin_ids:
-        return user_id in admin_ids
-    return user_id == admin_id
+from phone_status_bot.services.sms_gateway import _safe_host
 
 
 def register(bot):
 
     @bot.message_handler(commands=["ping"])
+    @admin_only
     def handle_ping(message):
-        if not _is_admin(message.from_user.id):
-            bot.reply_to(message, "⛔ هذا الأمر مخصص للمسؤول.")
-            return
-
         parts = (message.text or "").split(maxsplit=1)
-        host = parts[1].strip() if len(parts) > 1 else "8.8.8.8"
+        raw_host = parts[1] if len(parts) > 1 else "8.8.8.8"
+        host = _safe_host(raw_host)
+        if host is None:
+            # رفض المضيف غير الصالح — يمنع حقن وسوم Markdown في الرد
+            # ويمنع تمرير وسائط خطرة لأمر ping الخارجي.
+            bot.reply_to(message, "⚠️ اسم مضيف غير صالح.")
+            return
 
         status = bot.reply_to(message, f"⏳ جاري فحص الاتصال بـ {host}...")
 
