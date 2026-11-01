@@ -1,5 +1,6 @@
 """مراقبة أحداث الشاحن والـ Wi-Fi وإرسال تنبيه عند أي تغيّر."""
 
+import socket
 import time
 
 from phone_status_bot.core import config, state
@@ -49,12 +50,32 @@ def read_charging():
     return str(data["plugged"]).upper() != "UNPLUGGED", data.get("percentage")
 
 
+def _outbound_ip():
+    """IP الذي يخرج منه الجهاز فعلياً (لا يرسل أي حزمة)؛ None إن لم توجد شبكة."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.settimeout(2)
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        sock.close()
+
+
 def read_wifi():
-    """يرجع (هل Wi-Fi متصل، اسم الشبكة) أو None عند تعذر القراءة."""
+    """يرجع (هل Wi-Fi متصل فعلاً، اسم الشبكة) أو None عند تعذر القراءة.
+
+    termux-wifi-connectioninfo قد يرجع معلومات قديمة (COMPLETED) بعد إغلاق
+    الواي فاي، لذلك نقارن IP الواي فاي بالـ IP الذي يخرج منه الجهاز فعلاً.
+    """
     data = parse_json_output(run_termux_command(WIFI_COMMAND))
     if not isinstance(data, dict):
         return None
-    if data.get("supplicant_state") != "COMPLETED":
+    wifi_ip = str(data.get("ip", "")).strip()
+    if data.get("supplicant_state") != "COMPLETED" or wifi_ip in ("", "0.0.0.0"):
+        return False, None
+    if _outbound_ip() != wifi_ip:
         return False, None
     return True, str(data.get("ssid", "")).strip('"')
 
