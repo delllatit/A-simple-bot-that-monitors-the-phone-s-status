@@ -48,6 +48,7 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("network", "معلومات Wi-Fi"),
     telebot.types.BotCommand("cellular", "قوة الشبكة الخلوية وبيانات الهاتف"),
     telebot.types.BotCommand("hotspot", "تشغيل/إيقاف نقطة الاتصال (on/off)"),
+    telebot.types.BotCommand("bluetooth", "تشغيل/إيقاف البلوتوث (on/off)"),
     telebot.types.BotCommand("ping", "فحص اتصال الإنترنت"),
     telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
     telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),

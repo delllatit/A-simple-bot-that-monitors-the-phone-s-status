@@ -9,6 +9,7 @@ from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.core.termux import fetch_public_ip
 from phone_status_bot.core import state
 from phone_status_bot.services import battery, cellular, hotspot, whois
+from phone_status_bot.services import battery, bluetooth, cellular, hotspot, whois
 
 def register(bot):
     state.init_bot(bot)
@@ -146,4 +147,19 @@ def register(bot):
             bot.reply_to(message, "📶 انرسل أمر " + ("التشغيل" if arg == "on" else "الإيقاف") + " لـ MacroDroid.")
         else:
             bot.reply_to(message, "❌ فشل إرسال الأمر. راجع سجل البوت.")
-        logger.info("hotspot %s من المستخدم %s", arg, message.from_user.id)
+                # ================== /bluetooth ==================
+    @bot.message_handler(commands=["bluetooth"])
+    @admin_only
+    def handle_bluetooth(message):
+        parts = (message.text or "").split()
+        arg = parts[1].lower() if len(parts) > 1 else ""
+        if arg not in ("on", "off"):
+            bot.reply_to(message, "الاستخدام: /bluetooth on أو /bluetooth off")
+            return
+
+        ok = bluetooth.set_bluetooth(arg == "on")
+        if ok:
+            bot.reply_to(message, "🔵 انرسل أمر " + ("التشغيل" if arg == "on" else "الإيقاف") + " لـ MacroDroid.")
+        else:
+            bot.reply_to(message, "❌ فشل إرسال الأمر. راجع سجل البوت.")
+        logger.info("bluetooth %s من المستخدم %s", arg, message.from_user.id)
