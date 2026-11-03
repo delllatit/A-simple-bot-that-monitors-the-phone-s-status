@@ -36,6 +36,7 @@ HANDLER_MODULES = (
     recording,
     system,
     clipboard,
+    screenshot,
     general,
 )
 
@@ -50,6 +51,7 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),
     telebot.types.BotCommand("whois", "معلومات مالك عنوان IP (netname/descr/org/country)"),
     telebot.types.BotCommand("clipboard", "حفظ نص في حافظة الهاتف"),
+    telebot.types.BotCommand("screenshot", "التقاط لقطة شاشة للهاتف"),
     telebot.types.BotCommand("selfie", "تصوير بالكاميرا الأمامية"),
     telebot.types.BotCommand("photo", "تصوير بالكاميرا الخلفية"),
     telebot.types.BotCommand("hotspot", "تشغيل/إيقاف نقطة الاتصال (on/off)"),

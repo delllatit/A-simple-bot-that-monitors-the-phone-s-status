@@ -18,6 +18,7 @@ HELP_TEXT = (
     "📸 <b>الكاميرا والوسائط</b>\n"
     "  <code>/selfie</code> — تصوير بالكاميرا الأمامية\n"
     "  <code>/photo</code> — تصوير بالكاميرا الخلفية\n"
+    " <code>/screenshot</code> — تصوير الشاشة\n"
     "\n"
     "📶 <b>الشبكة والاتصال</b>\n"
     "  <code>/network</code> — معلومات Wi-Fi\n"
