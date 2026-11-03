@@ -20,6 +20,10 @@ import threading
 import requests
 import telebot
 
+from phone_status_bot.core import capabilities, config, state
+from phone_status_bot.core.logging_setup import logger, setup_logging
+from phone_status_bot.services import battery, events, recording as recording_service
+from phone_status_bot.services.sms_gateway import start_sms_server
 from phone_status_bot.handlers import (
     alert,
     caps,
