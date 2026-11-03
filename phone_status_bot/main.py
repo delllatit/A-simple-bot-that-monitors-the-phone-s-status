@@ -32,6 +32,7 @@ from phone_status_bot.handlers import (
 # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
 # (المسجَّل داخل register(general)) أخيراً ليلتقط ما تبقى من نصوص غير معروفة.
 HANDLER_MODULES = (
+    alert,
     caps,
     media,
     network,
@@ -52,6 +53,10 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("network", "معلومات Wi-Fi"),
     telebot.types.BotCommand("cellular", "قوة الشبكة الخلوية وبيانات الهاتف"),
     telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
+    telebot.types.BotCommand("ring", "نغمة + فلاش + اهتزاز معاً"),
+    telebot.types.BotCommand("tone", "نغمة"),
+    telebot.types.BotCommand("ring", "قلاش"),
+    telebot.types.BotCommand("vibrate", "اهتزاز فقط"),
     telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),
     telebot.types.BotCommand("whois", "معلومات مالك عنوان IP (netname/descr/org/country)"),
     telebot.types.BotCommand("clipboard", "حفظ نص في حافظة الهاتف"),
