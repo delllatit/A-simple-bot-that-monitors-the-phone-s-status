@@ -1,0 +1,473 @@
+From e4907c67c5238edb16b1a1ab4d15182ed82f5e11 Mon Sep 17 00:00:00 2001
+From: x <x@x>
+Date: Tue, 3 Nov 2026 09:03:46 +0000
+Subject: [PATCH] Add device capability detection and @requires gating
+
+---
+ phone_status_bot/core/capabilities.py  | 192 +++++++++++++++++++++++++
+ phone_status_bot/handlers/caps.py      |  18 +++
+ phone_status_bot/handlers/clipboard.py |   2 +
+ phone_status_bot/handlers/general.py   |   1 +
+ phone_status_bot/handlers/media.py     |   3 +
+ phone_status_bot/handlers/network.py   |   4 +
+ phone_status_bot/handlers/phone.py     |   3 +
+ phone_status_bot/handlers/recording.py |   2 +
+ phone_status_bot/handlers/screen.py    |   2 +
+ phone_status_bot/handlers/system.py    |   2 +
+ phone_status_bot/main.py               |   9 +-
+ 11 files changed, 236 insertions(+), 2 deletions(-)
+ create mode 100644 phone_status_bot/core/capabilities.py
+ create mode 100644 phone_status_bot/handlers/caps.py
+
+diff --git a/phone_status_bot/core/capabilities.py b/phone_status_bot/core/capabilities.py
+new file mode 100644
+index 0000000..fb3d063
+--- /dev/null
++++ b/phone_status_bot/core/capabilities.py
+@@ -0,0 +1,192 @@
++"""اكتشاف قدرات الجهاز عند التشغيل، وتعطيل الأوامر غير المدعومة برسالة واضحة.
++
++الفكرة: بدل ما نفترض إنو كل شي شغال، نفحص الجهاز مرة وحدة (بدون ما نلمس
++الكاميرا أو الرسائل أو غيرها)، ونخزّن النتيجة. كل أمر يعلن شو بيحتاج عبر
++FEATURES، والزخرفة @requires("اسم_الميزة") تمنع تنفيذه برسالة مفهومة لو ناقص شي.
++
++القيم: True = متاح، False = غير متاح، None = ما منقدر نتحقق (مثل MacroDroid).
++"""
++
++import functools
++import html
++import shutil
++import subprocess
++import threading
++
++from phone_status_bot.core import state
++from phone_status_bot.core.logging_setup import logger
++from phone_status_bot.core.termux import resolve_termux_bin
++
++# اسم القدرة -> أمر termux-api اللازم
++TERMUX_TOOLS = {
++    "battery": "termux-battery-status",
++    "wifi": "termux-wifi-connectioninfo",
++    "cellinfo": "termux-telephony-cellinfo",
++    "location": "termux-location",
++    "camera": "termux-camera-photo",
++    "microphone": "termux-microphone-record",
++    "sms_send": "termux-sms-send",
++    "sms_list": "termux-sms-list",
++    "call": "termux-telephony-call",
++    "contacts": "termux-contact-list",
++    "clipboard": "termux-clipboard-set",
++    "screencap": "termux-screencap",
++}
++
++# الميزة -> الأوامر + المتطلبات ("a|b" تعني: يكفي واحد منهم) + تلميح عند النقص
++FEATURES = {
++    "battery": {"cmds": "/battery", "needs": ["battery"],
++                "hint": "ثبّت تطبيق Termux:API من نفس مصدر Termux (F-Droid أو GitHub)."},
++    "wifi": {"cmds": "/network", "needs": ["wifi"], "hint": "يحتاج Termux:API."},
++    "cellular": {"cmds": "/cellular", "needs": ["cellinfo"],
++                 "hint": "يحتاج Termux:API وصلاحية الهاتف (Phone) لتطبيق Termux:API."},
++    "location": {"cmds": "/location", "needs": ["location"],
++                 "hint": "يحتاج Termux:API وصلاحية الموقع."},
++    "photo": {"cmds": "/selfie /photo", "needs": ["camera"],
++              "hint": "يحتاج Termux:API وصلاحية الكاميرا."},
++    "record": {"cmds": "/record /stop", "needs": ["microphone"],
++               "hint": "يحتاج Termux:API وصلاحية المايكروفون."},
++    "sms": {"cmds": "/sms", "needs": ["sms_send"],
++            "hint": "يحتاج Termux:API وصلاحية SMS."},
++    "call": {"cmds": "/call", "needs": ["call"],
++             "hint": "يحتاج Termux:API وصلاحية الهاتف."},
++    "contacts": {"cmds": "/contacts", "needs": ["contacts"],
++                 "hint": "يحتاج Termux:API وصلاحية جهات الاتصال."},
++    "clipboard": {"cmds": "/clipboard", "needs": ["clipboard"],
++                  "hint": "يحتاج Termux:API."},
++    "screenshot": {"cmds": "/screenshot", "needs": ["screencap|adb"],
++                   "hint": "يحتاج Termux:API (termux-screencap) أو adb."},
++    # ما في طريقة موثوقة لفحصها من داخل Termux، فتظهر ❔
++    "hotspot": {"cmds": "/hotspot", "needs": ["macrodroid"],
++                "hint": "يحتاج ماكرو MacroDroid يستقبل hotspot.on / hotspot.off."},
++    "bluetooth": {"cmds": "/bluetooth", "needs": ["macrodroid"],
++                  "hint": "يحتاج ماكرو MacroDroid يستقبل bluetooth.on / bluetooth.off."},
++}
++
++_lock = threading.Lock()
++_caps = None
++
++
++def _run(cmd, timeout=5):
++    try:
++        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
++    except (OSError, subprocess.SubprocessError):
++        return None
++
++
++def _readable(path):
++    try:
++        with open(path) as f:
++            return bool(f.read(1))
++    except OSError:
++        return False
++
++
++def _sdk():
++    r = _run(["getprop", "ro.build.version.sdk"])
++    out = r.stdout.strip() if r and r.returncode == 0 else ""
++    return int(out) if out.isdigit() else 0
++
++
++def detect():
++    """فحص الجهاز وتخزين النتيجة. آمن: لا يلمس الكاميرا/المايك/الرسائل."""
++    global _caps
++    caps = {"sdk": _sdk()}
++
++    # هل تطبيق Termux:API نفسه مثبّت ويرد؟ (الحزمة وحدها ما تكفي)
++    r = _run([resolve_termux_bin("termux-battery-status")], timeout=10)
++    api_live = bool(r and r.returncode == 0 and r.stdout.strip().startswith("{"))
++    caps["api_live"] = api_live
++
++    for cap, binary in TERMUX_TOOLS.items():
++        present = shutil.which(resolve_termux_bin(binary)) is not None
++        caps[cap] = present and api_live
++
++    caps["adb"] = shutil.which("adb") is not None
++
++    # الروت: قد يظهر طلب تأكيد (Magisk/KernelSU) أول مرة
++    r = _run(["su", "-c", "id"], timeout=8)
++    caps["root"] = bool(r and r.returncode == 0 and "uid=0" in r.stdout)
++
++    caps["proc_stat"] = _readable("/proc/stat")
++    caps["macrodroid"] = None  # غير قابل للتحقق
++
++    with _lock:
++        _caps = caps
++    logger.info("قدرات الجهاز: %s", caps)
++    if caps["sdk"] >= 31:
++        logger.warning(
++            "أندرويد %s: قد يقتل النظام عمليات Termux الفرعية (Phantom Process Killer). "
++            "راجع إعدادات البطارية وخيار تعطيل قيود العمليات الفرعية.", caps["sdk"])
++    return caps
++
++
++def get(refresh=False):
++    if refresh or _caps is None:
++        return detect()
++    return _caps
++
++
++def _token(caps, name):
++    return caps.get(name)
++
++
++def _need_state(caps, need):
++    """True / False / None لمتطلب واحد (يدعم a|b)."""
++    states = [_token(caps, n) for n in need.split("|")]
++    if any(s is True for s in states):
++        return True
++    if any(s is None for s in states):
++        return None
++    return False
++
++
++def feature_state(feature, caps=None):
++    caps = caps or get()
++    states = [_need_state(caps, n) for n in FEATURES[feature]["needs"]]
++    if any(s is False for s in states):
++        return False
++    if any(s is None for s in states):
++        return None
++    return True
++
++
++def requires(feature):
++    """زخرفة لمعالجات telebot: ترفض التنفيذ برسالة واضحة لو الميزة غير مدعومة.
++
++    ضعها تحت @admin_only مباشرة. الحالة None (غير قابلة للتحقق) تمرّ.
++    """
++    def deco(func):
++        @functools.wraps(func)
++        def wrapper(message, *args, **kwargs):
++            if feature_state(feature) is False:
++                info = FEATURES[feature]
++                state.bot.reply_to(
++                    message,
++                    f"⚠️ <b>{html.escape(info['cmds'])}</b> غير متاح على هالجهاز حالياً.\n"
++                    f"{html.escape(info['hint'])}\n"
++                    "بعد ما تصلحه ابعت <code>/capabilities refresh</code>.",
++                    parse_mode="HTML",
++                )
++                return
++            return func(message, *args, **kwargs)
++        return wrapper
++    return deco
++
++
++def describe(refresh=False):
++    caps = get(refresh)
++    icon = {True: "✅", False: "❌", None: "❔"}
++    lines = [
++        "🧩 <b>قدرات الجهاز</b>",
++        f"أندرويد API: <code>{caps['sdk'] or 'غير معروف'}</code>",
++        f"روت: {icon[caps['root']]}   Termux:API: {icon[caps['api_live']]}   adb: {icon[caps['adb']]}",
++        "",
++    ]
++    for name, info in FEATURES.items():
++        lines.append(f"{icon[feature_state(name, caps)]} <code>{html.escape(info['cmds'])}</code>")
++    lines.append("")
++    lines.append("❔ = ما منقدر نتحقق منها (تعتمد على إعداد خارجي).")
++    if caps["sdk"] >= 31:
++        lines.append("⚠️ أندرويد 12+: استثنِ Termux من توفير البطارية وعطّل قيود العمليات الفرعية.")
++    return "\n".join(lines)
+diff --git a/phone_status_bot/handlers/caps.py b/phone_status_bot/handlers/caps.py
+new file mode 100644
+index 0000000..008073b
+--- /dev/null
++++ b/phone_status_bot/handlers/caps.py
+@@ -0,0 +1,18 @@
++"""معالج /capabilities: عرض ما يدعمه الجهاز من ميزات البوت."""
++
++from phone_status_bot.core import capabilities, state
++from phone_status_bot.core.permissions import admin_only
++
++
++def register(bot):
++    state.init_bot(bot)
++
++    @bot.message_handler(commands=["capabilities", "caps"])
++    @admin_only
++    def handle_capabilities(message):
++        args = (message.text or "").lower().split()[1:]
++        bot.reply_to(
++            message,
++            capabilities.describe(refresh="refresh" in args),
++            parse_mode="HTML",
++        )
+diff --git a/phone_status_bot/handlers/clipboard.py b/phone_status_bot/handlers/clipboard.py
+index 9cd7f92..289dde6 100644
+--- a/phone_status_bot/handlers/clipboard.py
++++ b/phone_status_bot/handlers/clipboard.py
+@@ -2,6 +2,7 @@
+ import subprocess
+ 
+ from phone_status_bot.core import state
++from phone_status_bot.core.capabilities import requires
+ from phone_status_bot.core.permissions import admin_only
+ from phone_status_bot.core.termux import resolve_termux_bin
+ from phone_status_bot.core.logging_setup import logger
+@@ -12,6 +13,7 @@ def register(bot):
+ 
+     @bot.message_handler(commands=["clipboard"])
+     @admin_only
++    @requires("clipboard")
+     def copy_to_clipboard(message):
+         # النص المكتوب بعد الأمر
+         text = (message.text or "").partition(" ")[2].strip()
+diff --git a/phone_status_bot/handlers/general.py b/phone_status_bot/handlers/general.py
+index 5673cba..485ec2a 100644
+--- a/phone_status_bot/handlers/general.py
++++ b/phone_status_bot/handlers/general.py
+@@ -51,6 +51,7 @@ HELP_TEXT = (
+     "  <code>/uptime</code> — مدة تشغيل البوت\n"
+     "  <code>/status</code> — حالة البوت\n"
+     "  <code>/admins</code> — قائمة المسؤولين\n"
++    "  <code>/capabilities</code> — ما يدعمه الجهاز من ميزات\n"
+     "  <code>/help</code> — إظهار هذه الرسالة\n"
+ )
+ 
+diff --git a/phone_status_bot/handlers/media.py b/phone_status_bot/handlers/media.py
+index 85bd1e4..1015e00 100644
+--- a/phone_status_bot/handlers/media.py
++++ b/phone_status_bot/handlers/media.py
+@@ -3,6 +3,7 @@
+ import threading
+ 
+ from phone_status_bot.core.logging_setup import logger
++from phone_status_bot.core.capabilities import requires
+ from phone_status_bot.core.permissions import admin_only, safe_send
+ from phone_status_bot.core import state
+ from phone_status_bot.services import camera, location
+@@ -14,6 +15,7 @@ def register(bot):
+     # ================== /selfie و /photo ==================
+     @bot.message_handler(commands=["selfie", "photo"])
+     @admin_only
++    @requires("photo")
+     def handle_photo_request(message):
+         command = (message.text or "").split()[0].split("@")[0].lower()
+         camera_id = "1" if command == "/selfie" else "0"
+@@ -47,6 +49,7 @@ def register(bot):
+     # ================== /location ==================
+     @bot.message_handler(commands=["location"])
+     @admin_only
++    @requires("location")
+     def get_location(message):
+         """الجلب في خيط منفصل لأن GPS قد يستغرق حتى ~60 ثانية."""
+         threading.Thread(target=_fetch_and_send_location, args=(message,), daemon=True).start()
+diff --git a/phone_status_bot/handlers/network.py b/phone_status_bot/handlers/network.py
+index d7557e4..013abfc 100644
+--- a/phone_status_bot/handlers/network.py
++++ b/phone_status_bot/handlers/network.py
+@@ -5,6 +5,7 @@ import subprocess
+ import requests
+ 
+ from phone_status_bot.core.logging_setup import logger
++from phone_status_bot.core.capabilities import requires
+ from phone_status_bot.core.permissions import admin_only
+ from phone_status_bot.core.termux import fetch_public_ip
+ from phone_status_bot.core import state
+@@ -17,6 +18,7 @@ def register(bot):
+     # ================== /battery ==================
+     @bot.message_handler(commands=["battery"])
+     @admin_only
++    @requires("battery")
+     def get_battery_info(message):
+         report = battery.get_battery_report()
+         if report is None:
+@@ -106,6 +108,7 @@ def register(bot):
+     # ================== /network ==================
+     @bot.message_handler(commands=["network"])
+     @admin_only
++    @requires("wifi")
+     def get_network_info(message):
+         report = cellular.get_wifi_report()
+         if report is None:
+@@ -120,6 +123,7 @@ def register(bot):
+     # ================== /cellular ==================
+     @bot.message_handler(commands=["cellular", "signal"])
+     @admin_only
++    @requires("cellular")
+     def get_cellular_info(message):
+         report = cellular.get_cellular_report()
+         if report is None:
+diff --git a/phone_status_bot/handlers/phone.py b/phone_status_bot/handlers/phone.py
+index f39ed11..0d301d0 100644
+--- a/phone_status_bot/handlers/phone.py
++++ b/phone_status_bot/handlers/phone.py
+@@ -1,6 +1,7 @@
+ """معالجات الهاتف والرسائل: /sms و /call."""
+ 
+ from phone_status_bot.core.logging_setup import logger
++from phone_status_bot.core.capabilities import requires
+ from phone_status_bot.core.permissions import admin_only
+ from phone_status_bot.core import state
+ from phone_status_bot.services import messaging
+@@ -12,6 +13,7 @@ def register(bot):
+     # ================== /sms ==================
+     @bot.message_handler(commands=["sms"])
+     @admin_only
++    @requires("sms")
+     def send_sms(message):
+         parts = (message.text or "").split(maxsplit=2)
+         if len(parts) < 3:
+@@ -41,6 +43,7 @@ def register(bot):
+     # ================== /call ==================
+     @bot.message_handler(commands=["call"])
+     @admin_only
++    @requires("call")
+     def make_call(message):
+         parts = (message.text or "").split(maxsplit=1)
+         if len(parts) < 2:
+diff --git a/phone_status_bot/handlers/recording.py b/phone_status_bot/handlers/recording.py
+index 52e185c..ca620cc 100644
+--- a/phone_status_bot/handlers/recording.py
++++ b/phone_status_bot/handlers/recording.py
+@@ -4,6 +4,7 @@ import threading
+ 
+ from phone_status_bot.core import config, state
+ from phone_status_bot.core.logging_setup import logger
++from phone_status_bot.core.capabilities import requires
+ from phone_status_bot.core.permissions import admin_only
+ from phone_status_bot.services import recording
+ 
+@@ -13,6 +14,7 @@ def register(bot):
+ 
+     @bot.message_handler(commands=["record"])
+     @admin_only
++    @requires("record")
+     def start_recording(message):
+         ok, detail = recording.start_recording()
+         if not ok:
+diff --git a/phone_status_bot/handlers/screen.py b/phone_status_bot/handlers/screen.py
+index e01fd23..fcd3c02 100644
+--- a/phone_status_bot/handlers/screen.py
++++ b/phone_status_bot/handlers/screen.py
+@@ -5,12 +5,14 @@ import subprocess
+ 
+ from phone_status_bot.core import state
+ from phone_status_bot.core.logging_setup import logger
++from phone_status_bot.core.capabilities import requires
+ from phone_status_bot.core.permissions import admin_only
+ 
+ # مسار مؤقت داخل Termux
+ SCREENSHOT_PATH = "/data/data/com.termux/files/home/screenshot_temp.png"
+ 
+ @admin_only
++@requires("screenshot")
+ def take_screenshot(message):
+     bot = state.bot
+     chat_id = message.chat.id
+diff --git a/phone_status_bot/handlers/system.py b/phone_status_bot/handlers/system.py
+index 552ba73..c805a40 100644
+--- a/phone_status_bot/handlers/system.py
++++ b/phone_status_bot/handlers/system.py
+@@ -1,6 +1,7 @@
+ """معالجات النظام المحلي: /storage /cpu /contacts."""
+ 
+ from phone_status_bot.core.logging_setup import logger
++from phone_status_bot.core.capabilities import requires
+ from phone_status_bot.core.permissions import admin_only
+ from phone_status_bot.core import state
+ from phone_status_bot.services import system_info
+@@ -38,6 +39,7 @@ def register(bot):
+     # ================== /contacts ==================
+     @bot.message_handler(commands=["contacts"])
+     @admin_only
++    @requires("contacts")
+     def get_contacts(message):
+         """عرض جهات الاتصال (بحد أقصى 100 لتجنب الرسائل الضخمة)."""
+         try:
+diff --git a/phone_status_bot/main.py b/phone_status_bot/main.py
+index e44b2d6..ab7d2be 100644
+--- a/phone_status_bot/main.py
++++ b/phone_status_bot/main.py
+@@ -20,18 +20,19 @@ import threading
+ import requests
+ import telebot
+ 
+-from phone_status_bot.core import config, state
++from phone_status_bot.core import capabilities, config, state
+ from phone_status_bot.core.logging_setup import logger, setup_logging
+ from phone_status_bot.services import battery, recording as recording_service
+ from phone_status_bot.services.sms_gateway import start_sms_server
+ from phone_status_bot.handlers import clipboard, general, media, network, phone, ping, recording, system
+ from phone_status_bot.services import battery, events, recording as recording_service
+ from phone_status_bot.handlers import (
+-    clipboard, general, media, network, phone, ping, recording, screen, system
++    caps, clipboard, general, media, network, phone, ping, recording, screen, system
+ )
+ # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
+ # (المسجَّل داخل register(general)) أخيراً ليلتقط ما تبقى من نصوص غير معروفة.
+ HANDLER_MODULES = (
++    caps,
+     media,
+     network,
+     ping,
+@@ -71,6 +72,7 @@ BOT_COMMANDS = [
+     telebot.types.BotCommand("contacts", "قائمة جهات الاتصال"),
+     telebot.types.BotCommand("call", "إجراء مكالمة"),
+     telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
++    telebot.types.BotCommand("capabilities", "ما يدعمه الجهاز من ميزات"),
+ 
+ ]
+ 
+@@ -129,6 +131,9 @@ def run():
+     # 2) السجلات (ملف دوّار + وحدة تحكم) — logger الحزمة هو المصدر الوحيد
+     setup_logging()
+ 
++    # 2.5) اكتشاف قدرات الجهاز (إصدار أندرويد، Termux:API، روت...)
++    capabilities.detect()
++
+     # 3) تنظيف التسجيلات اليتيمة من جلسة سابقة (حتى بعد kill -9)
+     config.DATA_DIR.mkdir(parents=True, exist_ok=True)
+     recording_service.cleanup_orphan_recordings()
+-- 
+2.43.0
+
