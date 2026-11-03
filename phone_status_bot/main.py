@@ -36,7 +36,7 @@ HANDLER_MODULES = (
     recording,
     system,
     clipboard,
-    screenshot,
+    screen,
     general,
 )
 
