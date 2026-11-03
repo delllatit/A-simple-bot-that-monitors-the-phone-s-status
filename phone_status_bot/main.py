@@ -32,6 +32,19 @@ from phone_status_bot.handlers import (
 from phone_status_bot.handlers import (
     alert, clipboard, general, media, network, phone, ping, recording, system
 )
+from phone_status_bot.handlers import (
+    alert,   # <--- إضافة alert هنا
+    caps,
+    clipboard,
+    general,
+    media,
+    network,
+    phone,
+    ping,
+    recording,
+    screen,
+    system
+)
 
 # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
 # (المسجَّل داخل register(general)) أخيراً ليلتقط ما تبقى من نصوص غير معروفة.
