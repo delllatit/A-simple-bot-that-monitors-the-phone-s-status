@@ -42,20 +42,21 @@ HANDLER_MODULES = (
 # قائمة أوامر Telegram المعروضة في قائمة تلقية الإدخال
 BOT_COMMANDS = [
     telebot.types.BotCommand("start", "بدء استخدام البوت وعرض الأوامر"),
-    telebot.types.BotCommand("selfie", "تصوير بالكاميرا الأمامية"),
-    telebot.types.BotCommand("photo", "تصوير بالكاميرا الخلفية"),
+
+    telebot.types.BotCommand("clipboard", "حفظ نص في حافظة الهاتف"),
     telebot.types.BotCommand("battery", "معلومات البطارية"),
     telebot.types.BotCommand("network", "معلومات Wi-Fi"),
     telebot.types.BotCommand("cellular", "قوة الشبكة الخلوية وبيانات الهاتف"),
-    telebot.types.BotCommand("hotspot", "تشغيل/إيقاف نقطة الاتصال (on/off)"),
-    telebot.types.BotCommand("bluetooth", "تشغيل/إيقاف البلوتوث (on/off)"),
-    telebot.types.BotCommand("ping", "فحص اتصال الإنترنت"),
     telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
     telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),
     telebot.types.BotCommand("whois", "معلومات مالك عنوان IP (netname/descr/org/country)"),
+    telebot.types.BotCommand("selfie", "تصوير بالكاميرا الأمامية"),
+    telebot.types.BotCommand("photo", "تصوير بالكاميرا الخلفية"),
+    telebot.types.BotCommand("hotspot", "تشغيل/إيقاف نقطة الاتصال (on/off)"),
+    telebot.types.BotCommand("bluetooth", "تشغيل/إيقاف البلوتوث (on/off)"),
+    telebot.types.BotCommand("ping", "فحص اتصال الإنترنت"),
     telebot.types.BotCommand("record", "بدء التسجيل الصوتي"),
     telebot.types.BotCommand("stop", "إيقاف التسجيل وإرساله"),
-    telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
     telebot.types.BotCommand("uptime", "مدة تشغيل البوت"),
     telebot.types.BotCommand("status", "حالة البوت"),
     telebot.types.BotCommand("admins", "قائمة المسؤولين المعتمدين"),
@@ -64,7 +65,8 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("cpu", "استخدام المعالج والذاكرة"),
     telebot.types.BotCommand("contacts", "قائمة جهات الاتصال"),
     telebot.types.BotCommand("call", "إجراء مكالمة"),
-    telebot.types.BotCommand("clipboard", "حفظ نص في حافظة الهاتف"),
+    telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
+
 ]
 
 
