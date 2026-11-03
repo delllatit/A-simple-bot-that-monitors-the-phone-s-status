@@ -43,13 +43,13 @@ HANDLER_MODULES = (
 BOT_COMMANDS = [
     telebot.types.BotCommand("start", "بدء استخدام البوت وعرض الأوامر"),
 
-    telebot.types.BotCommand("clipboard", "حفظ نص في حافظة الهاتف"),
     telebot.types.BotCommand("battery", "معلومات البطارية"),
     telebot.types.BotCommand("network", "معلومات Wi-Fi"),
     telebot.types.BotCommand("cellular", "قوة الشبكة الخلوية وبيانات الهاتف"),
     telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
     telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),
     telebot.types.BotCommand("whois", "معلومات مالك عنوان IP (netname/descr/org/country)"),
+    telebot.types.BotCommand("clipboard", "حفظ نص في حافظة الهاتف"),
     telebot.types.BotCommand("selfie", "تصوير بالكاميرا الأمامية"),
     telebot.types.BotCommand("photo", "تصوير بالكاميرا الخلفية"),
     telebot.types.BotCommand("hotspot", "تشغيل/إيقاف نقطة الاتصال (on/off)"),
