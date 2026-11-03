@@ -31,6 +31,10 @@ TERMUX_TOOLS = {
     "contacts": "termux-contact-list",
     "clipboard": "termux-clipboard-set",
     "screencap": "termux-screencap",
+    "torch": "termux-torch",
+    "vibrate": "termux-vibrate",
+    "volume": "termux-volume",
+    "media_player": "termux-media-player",
 }
 
 # الميزة -> الأوامر + المتطلبات ("a|b" تعني: يكفي واحد منهم) + تلميح عند النقص
@@ -56,6 +60,12 @@ FEATURES = {
                   "hint": "يحتاج Termux:API."},
     "screenshot": {"cmds": "/screenshot", "needs": ["screencap|adb"],
                    "hint": "يحتاج Termux:API (termux-screencap) أو adb."},
+    "ring": {"cmds": "/ring", "needs": ["media_player|torch|vibrate"],
+                "hint": "يحتاج Termux:API (مشغّل وسائط أو كشاف أو اهتزاز)."},
+    "tone": {"cmds": "/tone", "needs": ["media_player"], "hint": "يحتاج Termux:API."},
+    "flash": {"cmds": "/flash", "needs": ["torch"],
+                 "hint": "يحتاج Termux:API وصلاحية الكاميرا."},
+    "vibrate": {"cmds": "/vibrate", "needs": ["vibrate"], "hint": "يحتاج Termux:API."},
     # ما في طريقة موثوقة لفحصها من داخل Termux، فتظهر ❔
     "hotspot": {"cmds": "/hotspot", "needs": ["macrodroid"],
                 "hint": "يحتاج ماكرو MacroDroid يستقبل hotspot.on / hotspot.off."},
