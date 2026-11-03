@@ -46,6 +46,7 @@ HELP_TEXT = (
     "  <code>/battery</code> — معلومات البطارية\n"
     "  <code>/storage</code> — مساحة القرص\n"
     "  <code>/cpu</code> — استخدام المعالج والذاكرة\n"
+    "  <code>/capabilities</code> — توافقية الجهاز\n"
     "\n"
     "ℹ️ <b>معلومات البوت</b>\n"
     "  <code>/uptime</code> — مدة تشغيل البوت\n"

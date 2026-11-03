@@ -71,6 +71,7 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("contacts", "قائمة جهات الاتصال"),
     telebot.types.BotCommand("call", "إجراء مكالمة"),
     telebot.types.BotCommand("sms", "إرسال رسالة SMS"),
+    telebot.types.BotCommand("capabilities", "توافقية الجهاز"),
 
 ]
 
