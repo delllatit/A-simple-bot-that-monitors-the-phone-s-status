@@ -59,7 +59,7 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
     telebot.types.BotCommand("ring", "نغمة + فلاش + اهتزاز معاً"),
     telebot.types.BotCommand("tone", "نغمة"),
-    telebot.types.BotCommand("ring", "قلاش"),
+    telebot.types.BotCommand("flash", "فلاش فقط"),
     telebot.types.BotCommand("vibrate", "اهتزاز فقط"),
     telebot.types.BotCommand("ip", "عنوان IP المحلي والعام"),
     telebot.types.BotCommand("whois", "معلومات مالك عنوان IP (netname/descr/org/country)"),
