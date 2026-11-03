@@ -26,6 +26,9 @@ from phone_status_bot.services import battery, recording as recording_service
 from phone_status_bot.services.sms_gateway import start_sms_server
 from phone_status_bot.handlers import clipboard, general, media, network, phone, ping, recording, system
 from phone_status_bot.services import battery, events, recording as recording_service
+from phone_status_bot.handlers import (
+    clipboard, general, media, network, phone, ping, recording, screen, system
+)
 # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
 # (المسجَّل داخل register(general)) أخيراً ليلتقط ما تبقى من نصوص غير معروفة.
 HANDLER_MODULES = (
