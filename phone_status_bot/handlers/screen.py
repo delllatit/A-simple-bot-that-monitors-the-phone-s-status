@@ -5,12 +5,14 @@ import subprocess
 
 from phone_status_bot.core import state
 from phone_status_bot.core.logging_setup import logger
+from phone_status_bot.core.capabilities import requires
 from phone_status_bot.core.permissions import admin_only
 
 # مسار مؤقت داخل Termux
 SCREENSHOT_PATH = "/data/data/com.termux/files/home/screenshot_temp.png"
 
 @admin_only
+@requires("screenshot")
 def take_screenshot(message):
     bot = state.bot
     chat_id = message.chat.id

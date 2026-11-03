@@ -5,6 +5,7 @@ import subprocess
 import requests
 
 from phone_status_bot.core.logging_setup import logger
+from phone_status_bot.core.capabilities import requires
 from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.core.termux import fetch_public_ip
 from phone_status_bot.core import state
@@ -17,6 +18,7 @@ def register(bot):
     # ================== /battery ==================
     @bot.message_handler(commands=["battery"])
     @admin_only
+    @requires("battery")
     def get_battery_info(message):
         report = battery.get_battery_report()
         if report is None:
@@ -106,6 +108,7 @@ def register(bot):
     # ================== /network ==================
     @bot.message_handler(commands=["network"])
     @admin_only
+    @requires("wifi")
     def get_network_info(message):
         report = cellular.get_wifi_report()
         if report is None:
@@ -120,6 +123,7 @@ def register(bot):
     # ================== /cellular ==================
     @bot.message_handler(commands=["cellular", "signal"])
     @admin_only
+    @requires("cellular")
     def get_cellular_info(message):
         report = cellular.get_cellular_report()
         if report is None:

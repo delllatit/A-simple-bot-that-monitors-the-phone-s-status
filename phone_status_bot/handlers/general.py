@@ -52,6 +52,7 @@ HELP_TEXT = (
     "  <code>/uptime</code> — مدة تشغيل البوت\n"
     "  <code>/status</code> — حالة البوت\n"
     "  <code>/admins</code> — قائمة المسؤولين\n"
+    "  <code>/capabilities</code> — ما يدعمه الجهاز من ميزات\n"
     "  <code>/help</code> — إظهار هذه الرسالة\n"
 )
 

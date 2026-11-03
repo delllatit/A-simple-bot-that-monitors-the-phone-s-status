@@ -1,6 +1,7 @@
 """معالجات الهاتف والرسائل: /sms و /call."""
 
 from phone_status_bot.core.logging_setup import logger
+from phone_status_bot.core.capabilities import requires
 from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.core import state
 from phone_status_bot.services import messaging
@@ -12,6 +13,7 @@ def register(bot):
     # ================== /sms ==================
     @bot.message_handler(commands=["sms"])
     @admin_only
+    @requires("sms")
     def send_sms(message):
         parts = (message.text or "").split(maxsplit=2)
         if len(parts) < 3:
@@ -41,6 +43,7 @@ def register(bot):
     # ================== /call ==================
     @bot.message_handler(commands=["call"])
     @admin_only
+    @requires("call")
     def make_call(message):
         parts = (message.text or "").split(maxsplit=1)
         if len(parts) < 2:

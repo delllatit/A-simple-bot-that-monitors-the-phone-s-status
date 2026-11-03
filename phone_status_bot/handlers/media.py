@@ -3,6 +3,7 @@
 import threading
 
 from phone_status_bot.core.logging_setup import logger
+from phone_status_bot.core.capabilities import requires
 from phone_status_bot.core.permissions import admin_only, safe_send
 from phone_status_bot.core import state
 from phone_status_bot.services import camera, location
@@ -14,6 +15,7 @@ def register(bot):
     # ================== /selfie و /photo ==================
     @bot.message_handler(commands=["selfie", "photo"])
     @admin_only
+    @requires("photo")
     def handle_photo_request(message):
         command = (message.text or "").split()[0].split("@")[0].lower()
         camera_id = "1" if command == "/selfie" else "0"
@@ -47,6 +49,7 @@ def register(bot):
     # ================== /location ==================
     @bot.message_handler(commands=["location"])
     @admin_only
+    @requires("location")
     def get_location(message):
         """الجلب في خيط منفصل لأن GPS قد يستغرق حتى ~60 ثانية."""
         threading.Thread(target=_fetch_and_send_location, args=(message,), daemon=True).start()

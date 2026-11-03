@@ -2,6 +2,7 @@
 import subprocess
 
 from phone_status_bot.core import state
+from phone_status_bot.core.capabilities import requires
 from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.core.termux import resolve_termux_bin
 from phone_status_bot.core.logging_setup import logger
@@ -12,6 +13,7 @@ def register(bot):
 
     @bot.message_handler(commands=["clipboard"])
     @admin_only
+    @requires("clipboard")
     def copy_to_clipboard(message):
         # النص المكتوب بعد الأمر
         text = (message.text or "").partition(" ")[2].strip()

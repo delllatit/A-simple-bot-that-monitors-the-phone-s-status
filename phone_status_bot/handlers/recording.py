@@ -4,6 +4,7 @@ import threading
 
 from phone_status_bot.core import config, state
 from phone_status_bot.core.logging_setup import logger
+from phone_status_bot.core.capabilities import requires
 from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.services import recording
 
@@ -13,6 +14,7 @@ def register(bot):
 
     @bot.message_handler(commands=["record"])
     @admin_only
+    @requires("record")
     def start_recording(message):
         ok, detail = recording.start_recording()
         if not ok:

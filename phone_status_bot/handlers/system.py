@@ -1,6 +1,7 @@
 """معالجات النظام المحلي: /storage /cpu /contacts."""
 
 from phone_status_bot.core.logging_setup import logger
+from phone_status_bot.core.capabilities import requires
 from phone_status_bot.core.permissions import admin_only
 from phone_status_bot.core import state
 from phone_status_bot.services import system_info
@@ -38,6 +39,7 @@ def register(bot):
     # ================== /contacts ==================
     @bot.message_handler(commands=["contacts"])
     @admin_only
+    @requires("contacts")
     def get_contacts(message):
         """عرض جهات الاتصال (بحد أقصى 100 لتجنب الرسائل الضخمة)."""
         try:

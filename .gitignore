@@ -3,3 +3,4 @@ __pycache__/
 *.env
 !*.env.example
 bot-logs/
+*.kate-swp
