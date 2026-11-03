@@ -11,7 +11,7 @@ from phone_status_bot.core.permissions import admin_only
 BOT_START_TIME = datetime.datetime.now()
 
 HELP_TEXT = (
-    "أهلاً بك! الأوامر المتاحة:\n\n"
+    "أهلاً بك! الأوامر المتاحة:\n"
     "/selfie - تصوير بالكاميرا الأمامية\n"
     "/photo - تصوير بالكاميرا الخلفية\n"
     "/battery - معلومات البطارية\n"
@@ -28,7 +28,6 @@ HELP_TEXT = (
     "/stop - إيقاف التسجيل وإرساله\n"
     "/sms رقم نص - إرسال رسالة SMS\n"
     "/uptime - مدة تشغيل البوت\n"
-    "/status - حالة البوت\n"
     "/admins - قائمة المسؤولين المعتمدين\n"
     "/help - إظهار هذه الرسالة\n"
     "/storage - مساحة القرص\n"
