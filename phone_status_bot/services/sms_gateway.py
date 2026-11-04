@@ -9,7 +9,7 @@ from collections import deque
 
 from flask import Flask, request, jsonify
 
-from phone_status_bot.core import config
+from phone_status_bot.core import config, outbox
 
 logger = logging.getLogger("telegram_bot")
 
@@ -115,6 +115,7 @@ def register_sms_routes(bot, admin_ids):
         )
 
         sent = 0
+        queued = 0
 
         for admin_id in admin_ids:
             try:
@@ -125,7 +126,12 @@ def register_sms_routes(bot, admin_ids):
                     "Failed to send SMS notification to admin %s",
                     admin_id
                 )
+                # لا نخسر الرسالة: تنحفظ وتُرسل لما يرجع الإنترنت
+                outbox.enqueue(admin_id, text, "HTML")
+                queued += 1
 
+        if sent == 0 and queued:
+            return jsonify({"status": "queued"}), 202
         if sent == 0:
             return jsonify({
                 "error": "Could not deliver message to any admin"

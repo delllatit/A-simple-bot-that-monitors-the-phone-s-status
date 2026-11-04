@@ -67,10 +67,16 @@ def _safe_reply(message, text, **kwargs):
         pass
 
 
-def safe_send(chat_id, text, **kwargs):
-    """إرسال رسالة إلى محادثة معينة مع تسجيل الفشل بدل رفعه."""
+def safe_send(chat_id, text, queue=False, **kwargs):
+    """إرسال رسالة إلى محادثة معينة مع تسجيل الفشل بدل رفعه.
+
+    queue=True: عند الفشل (مثلاً انقطاع إنترنت) تُحفظ بطابور دائم وتُعاد لاحقاً.
+    """
     try:
         return state.bot.send_message(chat_id, text, **kwargs)
     except Exception as e:
         logger.error("فشل إرسال تنبيه إلى %s: %s", chat_id, e)
+        if queue:
+            from phone_status_bot.core import outbox
+            outbox.enqueue(chat_id, text, kwargs.get("parse_mode"))
         return None

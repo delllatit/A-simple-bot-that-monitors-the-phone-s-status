@@ -85,6 +85,7 @@ def battery_monitor():
                                 f"⚠️ <b>تنبيه البطارية:</b>\nالنسبة الحالية: {percentage}%\n"
                                 f"(وصلت إلى أقل من {threshold}%)",
                                 parse_mode="HTML",
+                                queue=True,
                             )
         except FileNotFoundError:
             # تنبيه مرة واحدة فقط إذا كان termux-api غير مثبت

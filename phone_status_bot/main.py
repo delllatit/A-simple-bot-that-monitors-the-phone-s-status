@@ -20,7 +20,7 @@ import threading
 import requests
 import telebot
 
-from phone_status_bot.core import capabilities, config, state
+from phone_status_bot.core import capabilities, config, outbox, state
 from phone_status_bot.core.logging_setup import logger, setup_logging
 from phone_status_bot.services import battery, events, recording as recording_service
 from phone_status_bot.services.sms_gateway import start_sms_server
@@ -176,6 +176,8 @@ def run():
     monitor_thread.start()
     events_thread = threading.Thread(target=events.events_monitor, daemon=True)
     events_thread.start()
+    outbox_thread = threading.Thread(target=outbox.outbox_worker, daemon=True)
+    outbox_thread.start()
 
     # 8) حلقة الاستطلاع الرئيسية
     _poll_with_backoff(bot)
