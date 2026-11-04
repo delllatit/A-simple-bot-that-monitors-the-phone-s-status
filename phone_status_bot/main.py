@@ -27,6 +27,7 @@ from phone_status_bot.services.sms_gateway import start_sms_server
 from phone_status_bot.handlers import (
     alert,
     caps,
+    track,
     clipboard,
     general,
     media,
@@ -42,6 +43,7 @@ from phone_status_bot.handlers import (
 HANDLER_MODULES = (
     alert,
     caps,
+    track,
     media,
     network,
     ping,
@@ -60,6 +62,8 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("battery", "معلومات البطارية"),
     telebot.types.BotCommand("network", "معلومات Wi-Fi"),
     telebot.types.BotCommand("cellular", "قوة الشبكة الخلوية وبيانات الهاتف"),
+    telebot.types.BotCommand("track", "find my phone on"),
+    telebot.types.BotCommand("track", "find my phone off"),
     telebot.types.BotCommand("location", "الموقع الحالي عبر GPS"),
     telebot.types.BotCommand("ring", "نغمة + فلاش + اهتزاز معاً"),
     telebot.types.BotCommand("tone", "نغمة"),
