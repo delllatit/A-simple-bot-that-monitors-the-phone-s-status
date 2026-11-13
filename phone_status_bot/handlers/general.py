@@ -21,6 +21,7 @@ HELP_TEXT = (
     "/location - الموقع الحالي عبر GPS\n"
     "/ip - عنوان IP المحلي والعام\n"
     "/hotspot - on/off \n"
+    "/wifi [SSID] - عرض/تغيير شبكة Wi-Fi المحفوظة (/wifi list، /wifi reconnect)\n"
     "/whois ip - معلومات مالك عنوان IP (netname/descr/org/country)\n"
     "/record - بدأ التسجيل الصوتي\n"
     "/stop - إيقاف التسجيل وإرساله\n"
