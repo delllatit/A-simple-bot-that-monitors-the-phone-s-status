@@ -119,7 +119,7 @@ python mybot_qwen1.py
 - `/help` — Show command list
 - `/battery` — Battery details
 - `/network` — Wi-Fi information
-- `/wifi` — Show/change the connected Wi-Fi network (`/wifi <SSID> [password]` via MacroDroid, `/wifi list`, `/wifi reconnect`)
+- `/wifi` — Show/change the connected Wi-Fi network (`/wifi <SSID>` connects to a saved network via Termux:API + MacroDroid without a password, `/wifi list`, `/wifi reconnect`)
 - `/cellular` — Cellular signal details
 - `/location` — Current GPS location
 - `/ip` — Local and public IP information

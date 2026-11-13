@@ -157,10 +157,13 @@ def register(bot):
     def handle_wifi(message):
         """تغيير شبكة Wi-Fi المتصل بها الجهاز.
 
+        تعتمد الطريقة على Termux:API + MacroDroid (مثل /hotspot)، والاتصال
+        يتم مع الشبكات المحفوظة في الهاتف دون الحاجة لكلمة مرور.
+
         الاستخدام:
             /wifi                     → عرض الشبكة الحالية والمساعدة
             /wifi list                → قائمة الشبكات المحفوظة (يتطلب root)
-            /wifi <SSID> [الكلمة]     → الاتصال بشبكة جديدة عبر MacroDroid
+            /wifi <SSID>              → الاتصال بشبكة محفوظة عبر MacroDroid
             /wifi reconnect           → إعادة تشغيل واجهة Wi-Fi للتبديل بين
                                          الشبكات المحفوظة (الأعلى أولوية)
         """
@@ -172,13 +175,13 @@ def register(bot):
             current = wifi.get_connected_ssid()
             if current:
                 bot.reply_to(message, f"📡 الشبكة المتصل بها حالياً: <b>{current}</b>\n\n"
-                                      "<code>/wifi &lt;SSID&gt; [كلمة المرور]</code> — الاتصال بشبكة أخرى\n"
+                                      "<code>/wifi &lt;SSID&gt;</code> — الاتصال بشبكة محفوظة (بدون كلمة مرور)\n"
                                       "<code>/wifi list</code> — الشبكات المحفوظة\n"
                                       "<code>/wifi reconnect</code> — إعادة الاتصال/التبديل",
                             parse_mode="HTML")
             else:
                 bot.reply_to(message, "📡 لا يوجد اتصال Wi-Fi نشط حالياً.\n"
-                                      "جرّب /wifi &lt;SSID&gt; [كلمة المرور] للاتصال بشبكة.",
+                                      "جرّب /wifi &lt;SSID&gt; للاتصال بشبكة محفوظة.",
                             parse_mode="HTML")
             return
 
@@ -226,7 +229,7 @@ def register(bot):
             logger.info("wifi reconnect من المستخدم %s -> %s", message.from_user.id, new_ssid)
             return
 
-        # --- /wifi <SSID> [password] ---
+        # --- /wifi <SSID> : الاتصال بشبكة محفوظة (كلمة المرور اختيارية) ---
         ssid = arg
         password = parts[2].strip() if len(parts) > 2 else None
         if not wifi.is_valid_ssid(ssid):
@@ -264,9 +267,10 @@ def register(bot):
                 status.chat.id, status.message_id,
                 "⚠️ أُرسل أمر الاتصال لكن لم يتم التأكد من نجاحه خلال 30 ثانية."
                 f"{hint}\n"
-                "تأكد من إعداد ماكرو في MacroDroid يستقبل الـ Action "
-                "`com.termux.WIFI_CONNECT` (Extras: ssid/password) وينفذ "
-                "مهمة Connect to WiFi network.",
+                "تأكد من إعداد ماكرو في MacroDroid:\n"
+                "• Trigger: Receive Intent بالـ Action "
+                "`com.macrodroid.intent.action.CONNECT_WIFI` مع Extra اسمه `ssid`\n"
+                "• Action: Connect to WiFi network بقيمة الـ Extra (اترك كلمة المرور فارغة للشبكات المحفوظة).",
             )
         logger.info("wifi connect '%s' من المستخدم %s -> connected='%s'",
                     ssid, message.from_user.id, new_ssid)

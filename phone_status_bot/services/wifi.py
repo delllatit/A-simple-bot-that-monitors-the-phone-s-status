@@ -1,21 +1,24 @@
 """تغيير شبكة Wi-Fi المتصل بها الجهاز.
 
 Android لا يسمح للتطبيقات العادية (ومنها Termux بدون root) بالاتصال بشبكة
-Wi-Fi جديدة برمجياً مباشرة، لأن ذلك يتطلب صلاحيات نظام خاصة. لذلك يعتمد
-هذا الملف طريقتين:
+Wi-Fi جديدة برمجياً مباشرة، لكن Termux:API يوفر أمر `am` الذي يرسل
+broadcast يستقبله MacroDroid وينفذ مهمة "Connect to WiFi network" — وهذا
+يعمل مع الشبكات المحفوظة في الهاتف دون الحاجة لإدخال كلمة مرور.
 
-1) الطريقة الافتراضية (بدون root) — عبر MacroDroid مثل أمر /hotspot:
-   يرسل البوت broadcast يحمل اسم الشبكة وكلمة المرور إلى MacroDroid،
-   وقواعد MacroDroid تنفذ الاتصال (بعد منح MacroDroid صلاحية الموقع/Wi-Fi).
+التصميم الحالي (بدون root):
+   البوت يرسل broadcast عبر Termux:API (`am broadcast`) يحمل اسم الشبكة،
+   وماكرو MacroDroid ينفذ الاتصال بالشبكة المحفوظة.
    يجب إنشاء ماكرو في MacroDroid:
-       Trigger : Receive Intent / Broadcast بالـ Action التالي:
-                 com.termux.WIFI_CONNECT  + Extra اسمه ssid (وpassword اختيارياً)
-       Action  : Connect to WiFi network (بقيم الـ Extras)
+       Trigger : Receive Intent / Broadcast
+                 Action : com.macrodroid.intent.action.CONNECT_WIFI
+                 Extra  : ssid (نص)
+       Action  : Connect to WiFi network → قيمة الـ Extra "ssid"
+                 (اترك خانة كلمة المرور فارغة للشبكات المحفوظة)
 
-2) طريقة متقدمة (جذور فقط):
-   - قراءة الشبكات المحفوظة من WifiConfigStore.xml.
-   - التبديل بين شبكتين محفوظتين بإعادة تشغيل واجهة Wi-Fi (svc wifi disable
-     ثم enable)، أو تعديل <priority> / حذف الشبكة الأخرى من الملف للتحكم الدقيق.
+طريقة متقدمة (اختيارية، تتطلب root):
+   - قراءة الشبكات المحفوظة من WifiConfigStore.xml لأمر /wifi list.
+   - إعادة تشغيل واجهة Wi-Fi (svc wifi disable ثم enable) للتبديل بين
+     الشبكات المحفوظة حسب الأولوية.
 
 مدخلات المستخدم تُتحقق منها بـ is_valid_ssid لمنع حقن الأوامر، وتُمرَّر
 دائماً كقوائم مفصولة بدون shell=True.
@@ -38,8 +41,8 @@ WIFI_CONFIG_CANDIDATES = (
     "/data/misc/wifi/WifiConfigStore.xml",                        # Android أقدم
 )
 
-# الـ Action المتفق عليه مع MacroDroid
-MACROIDROID_WIFI_ACTION = "com.termux.WIFI_CONNECT"
+# الـ Action المتفق عليه مع MacroDroid (اسم الشبكة في Extra اسمه ssid)
+MACROIDROID_WIFI_ACTION = "com.macrodroid.intent.action.CONNECT_WIFI"
 
 # أحرف ممنوعة في SSID لأنها خطيرة في سياق الأوامر/الـ Intents
 _SSID_ALLOWED = re.compile(r'^[^\'"`$\\<>|;&\n\r]+$')
@@ -85,7 +88,10 @@ def list_saved_networks():
 
 
 def connect_via_macrodroid(ssid, password=None):
-    """إرسال broadcast لـ MacroDroid للاتصال بالشبكة المعطاة.
+    """إرسال broadcast عبر Termux:API (`am`) لـ MacroDroid للاتصال بالشبكة.
+
+    password اختيارية: إذا كانت الشبكة محفوظة في الهاتف فلن يحتاج الماكرو
+    كلمة مرور (اترك خانة كلمة المرور فارغة في إجراء MacroDroid).
 
     True = أُرسل الأمر (وليس ضماناً لنجاح الاتصال؛ التحقق يتم عبر
     get_connected_ssid بعد ثوانٍ).
