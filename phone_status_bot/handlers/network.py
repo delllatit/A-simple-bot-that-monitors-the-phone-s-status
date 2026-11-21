@@ -298,18 +298,16 @@ def register(bot):
         logger.info("wifi connect '%s' من المستخدم %s -> connected='%s'",
                     ssid, message.from_user.id, new_ssid)
         # ================== /scanwifi ==================
-    @bot.message_handler(commands=["scanwifi"])
-    @admin_only
-    def handle_scanwifi(message):
+        @bot.message_handler(commands=["scanwifi"])
+        @admin_only
+        def handle_scanwifi(message):
             """عرض شبكات Wi-Fi التي رصدها آخر مسح أجراه نظام أندرويد."""
-
-
             try:
                 result = subprocess.run(
                     ["termux-wifi-scaninfo"],
                     capture_output=True,
                     text=True,
-       t             check=True,
+                    check=True,
                     timeout=15,
                 )
                 networks = json.loads(result.stdout or "[]")
@@ -330,7 +328,7 @@ def register(bot):
             except json.JSONDecodeError:
                 bot.reply_to(message, "❌ تعذّر تحليل بيانات الشبكات.")
                 return
-
+    
             if not networks:
                 bot.reply_to(
                     message,
@@ -338,24 +336,28 @@ def register(bot):
                     "💡 افتح إعدادات الواي فاي لبضع ثوانٍ لإجبار النظام على مسح جديد، ثم أعد المحاولة.",
                 )
                 return
-
-            # ترتيب حسب قوة الإشارة (الأقوى أولاً)
-            networks.sort(key=lambda n: n.get("RSSI", -200), reverse=True)
+    
+            # ترتيب حسب قوة الإشارة (ندعم level و RSSI)
+            networks.sort(key=lambda n: n.get("level", n.get("RSSI", -200)), reverse=True)
+    
+            lines = [f"📶 الشبكات المرصودة ({len(networks)}):\n"]
             for net in networks:
-                # استخدام الدوال البديلة لضمان قراءة البيانات سواء كانت الحروف كبيرة أو صغيرة
+                # استخدام الحروف الصغيرة (التي تأتي من Termux) أو الكبيرة كبديل
                 ssid = net.get("ssid") or net.get("SSID") or "[مخفي]"
                 bssid = net.get("bssid") or net.get("BSSID") or "-"
                 rssi = net.get("level") or net.get("RSSI") or "?"
-                freq = net.get("frequency") or "?"sort(key=lambda n: n.get("RSSI", -200), reverse=True)
-
-            lines = [f"📶 الشبكات المرصودة ({len(networks)}):\n"]
-         
+                freq = net.get("frequency") or "?"
+                
+                # تأمين النصوص لتجنب أخطاء HTML
+                ssid_safe = html.escape(str(ssid))
+                bssid_safe = html.escape(str(bssid))
+                
                 lines.append(
                     f"• <b>{ssid_safe}</b>\n"
                     f"   BSSID: <code>{bssid_safe}</code>\n"
-                    f"   الإشارة: {net.get('RSSI', '?')} dBm | التردد: {net.get('frequency', '?')} MHz\n"
+                    f"   الإشارة: {rssi} dBm | التردد: {freq} MHz\n"
                 )
-
+    
             lines.append("\nℹ️ هذه نتائج آخر مسح أجراه النظام، وليست مسحاً فورياً.")
             bot.reply_to(message, "\n".join(lines), parse_mode="HTML")
             logger.info("scanwifi: %d شبكة للمستخدم %s", len(networks), message.from_user.id)
