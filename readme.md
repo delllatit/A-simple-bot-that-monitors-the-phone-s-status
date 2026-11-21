@@ -101,27 +101,62 @@ SMS_RATE_WINDOW=60
 - `RATE_LIMIT_WINDOW`: Rate limit window in seconds
 
 ## Project Structure
+.
+&#9500;&#9472;&#9472; add-capabilities.patch
+&#9500;&#9472;&#9472; .env.example
+&#9500;&#9472;&#9472; .gitignore
+&#9500;&#9472;&#9472; lapython
+&#9500;&#9472;&#9472; mybot_qwen1.py
+&#9500;&#9472;&#9472; phone_status_bot
+&#9474;   &#9500;&#9472;&#9472; core
+&#9474;   &#9474;   &#9500;&#9472;&#9472; capabilities.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; config.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; html_utils.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; __init__.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; logging_setup.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; outbox.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; permissions.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; state.py
+&#9474;   &#9474;   &#9492;&#9472;&#9472; termux.py
+&#9474;   &#9500;&#9472;&#9472; handlers
+&#9474;   &#9474;   &#9500;&#9472;&#9472; alert.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; caps.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; clipboard.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; general.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; __init__.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; media.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; network.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; phone.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; ping.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; recording.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; screen.py
+&#9474;   &#9474;   &#9500;&#9472;&#9472; system.py
+&#9474;   &#9474;   &#9492;&#9472;&#9472; track.py
+&#9474;   &#9500;&#9472;&#9472; __init__.py
+&#9474;   &#9500;&#9472;&#9472; main.py
+&#9474;   &#9492;&#9472;&#9472; services
+&#9474;       &#9500;&#9472;&#9472; alert.py
+&#9474;       &#9500;&#9472;&#9472; battery.py
+&#9474;       &#9500;&#9472;&#9472; bluetooth.py
+&#9474;       &#9500;&#9472;&#9472; camera.py
+&#9474;       &#9500;&#9472;&#9472; cellular.py
+&#9474;       &#9500;&#9472;&#9472; events.py
+&#9474;       &#9500;&#9472;&#9472; hotspot.py
+&#9474;       &#9500;&#9472;&#9472; __init__.py
+&#9474;       &#9500;&#9472;&#9472; location.py
+&#9474;       &#9500;&#9472;&#9472; messaging.py
+&#9474;       &#9500;&#9472;&#9472; ping_service.py
+&#9474;       &#9500;&#9472;&#9472; recording.py
+&#9474;       &#9500;&#9472;&#9472; sms_gateway.py
+&#9474;       &#9500;&#9472;&#9472; system_info.py
+&#9474;       &#9500;&#9472;&#9472; track.py
+&#9474;       &#9500;&#9472;&#9472; whois.py
+&#9474;       &#9492;&#9472;&#9472; wifi.py
+&#9500;&#9472;&#9472; readme.md
+&#9500;&#9472;&#9472; requirements.txt
+&#9492;&#9472;&#9472; SECURITY_TEST_REPORT.md
 
-```text
-A-simple-bot-that-monitors-the-phone-s-status/
-â”œâ”€â”€ mybot_qwen1.py
-â”œâ”€â”€ requirements.txt
-â”œâ”€â”€ readme.md
-â”œâ”€â”€ .gitignore
-â””â”€â”€ phone_status_bot/
-    â”œâ”€â”€ __init__.py
-    â”œâ”€â”€ main.py
-    â”œâ”€â”€ core/
-    â”‚   â”œâ”€â”€ config.py
-    â”‚   â”œâ”€â”€ permissions.py
-    â”‚   â”œâ”€â”€ state.py
-    â”‚   â”œâ”€â”€ termux.py
-    â”‚   â”œâ”€â”€ logging_setup.py
-    â”‚   â””â”€â”€ html_utils.py
-    â”œâ”€â”€ handlers/
-    â”œâ”€â”€ services/
-    â””â”€â”€ ...
-```
+
 
 ## Running the Bot
 
@@ -147,21 +182,21 @@ python mybot_qwen1.py
 -  `/clipboard` - save text
 - `/wifi`  -change WiFi ssid
 
-- `/wifi` â€” Show/change the connected Wi-Fi network (`/wifi <SSID>` connects to a saved network via Termux:API + MacroDroid without a password, `/wifi list`, `/wifi reconnect`)
-- `/cellular` â€” Cellular signal details
-- `/location` â€” Current GPS location
-- `/ip` â€” Local and public IP information
-- `/whois` â€” IP owner lookup
-- `/record` â€” Start voice recording
-- `/stop` â€” Stop and send the recording
-- `/sms` â€” Send an SMS
-- `/uptime` â€” Bot runtime
-- `/status` â€” Bot status
-- `/admins` â€” Admin list
-- `/storage` â€” Disk usage
-- `/cpu` â€” CPU and memory usage
-- `/contacts` â€” Contacts list
-- `/call` â€” Place a call
+- `/wifi` ” Show/change the connected Wi-Fi network (`/wifi <SSID>` connects to a saved network via Termux:API + MacroDroid without a password, `/wifi list`, `/wifi reconnect`)
+- `/cellular` ” Cellular signal details
+- `/location` ” Current GPS location
+- `/ip` ” Local and public IP information
+- `/whois` ” IP owner lookup
+- `/record` ” Start voice recording
+- `/stop` ” Stop and send the recording
+- `/sms` ” Send an SMS
+- `/uptime` ” Bot runtime
+- `/status` ” Bot status
+- `/admins` ” Admin list
+- `/storage` ” Disk usage
+- `/cpu` ” CPU and memory usage
+- `/contacts` ” Contacts list
+- `/call` ” Place a call
 - `/ping` - test conected
 - `
 - `

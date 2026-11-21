@@ -71,6 +71,8 @@ FEATURES = {
                 "hint": "يحتاج ماكرو MacroDroid يستقبل hotspot.on / hotspot.off."},
     "bluetooth": {"cmds": "/bluetooth", "needs": ["macrodroid"],
                   "hint": "يحتاج ماكرو MacroDroid يستقبل bluetooth.on / bluetooth.off."},
+    "wifi_scan": {"cmds": "/scanwifi", "needs": ["termux-wifi-scaninfo"],
+                  "hint": "يحتاج Termux:API (termux-wifi-scaninfo)."},
 }
 
 _lock = threading.Lock()

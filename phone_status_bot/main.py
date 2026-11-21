@@ -37,6 +37,7 @@ from phone_status_bot.handlers import (
     recording,
     screen,
     system,
+    wifi_scan,
 )
 # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
 # (المسجَّل داخل register(general)) أخيراً ليلتقط ما تبقى من نصوص غير معروفة.
@@ -52,6 +53,7 @@ HANDLER_MODULES = (
     system,
     clipboard,
     screen,
+    wifi_scan,
     general,
 )
 
@@ -62,6 +64,7 @@ BOT_COMMANDS = [
     telebot.types.BotCommand("battery", "معلومات البطارية"),
     telebot.types.BotCommand("network", "معلومات Wi-Fi"),
     telebot.types.BotCommand("cellular", "قوة الشبكة الخلوية وبيانات الهاتف"),
+    telebot.types.BotCommand("scanwifi", "عرض شبكات Wi-Fi المرصودة"),
     telebot.types.BotCommand("hotspot", "تشغيل/إيقاف نقطة الاتصال (on/off)"),
     telebot.types.BotCommand("wifi", "عرض/تغيير شبكة Wi-Fi المتصل بها"),
     telebot.types.BotCommand("ping", "فحص اتصال الإنترنت"),
