@@ -297,12 +297,12 @@ def register(bot):
         logger.info("wifi connect '%s' من المستخدم %s -> connected='%s'",
                     ssid, message.from_user.id, new_ssid)
         # ================== /scanwifi ==================
-        @bot.message_handler(commands=["scanwifi"])
-        @admin_only
-        def handle_scanwifi(message):
+    @bot.message_handler(commands=["scanwifi"])
+    @admin_only
+    def handle_scanwifi(message):
             """عرض شبكات Wi-Fi التي رصدها آخر مسح أجراه نظام أندرويد."""
-           
-    
+
+
             try:
                 result = _sp.run(
                     ["termux-wifi-scaninfo"],
@@ -329,7 +329,7 @@ def register(bot):
             except json.JSONDecodeError:
                 bot.reply_to(message, "❌ تعذّر تحليل بيانات الشبكات.")
                 return
-    
+
             if not networks:
                 bot.reply_to(
                     message,
@@ -337,10 +337,10 @@ def register(bot):
                     "💡 افتح إعدادات الواي فاي لبضع ثوانٍ لإجبار النظام على مسح جديد، ثم أعد المحاولة.",
                 )
                 return
-    
+
             # ترتيب حسب قوة الإشارة (الأقوى أولاً)
             networks.sort(key=lambda n: n.get("RSSI", -200), reverse=True)
-    
+
             lines = [f"📶 الشبكات المرصودة ({len(networks)}):\n"]
             for net in networks:
                 ssid = net.get("SSID") or "<مخفي>"
@@ -355,4 +355,3 @@ def register(bot):
             lines.append("\nℹ️ هذه نتائج آخر مسح أجراه النظام، وليست مسحاً فورياً.")
             bot.reply_to(message, "\n".join(lines), parse_mode="HTML")
             logger.info("scanwifi: %d شبكة للمستخدم %s", len(networks), message.from_user.id)
- 
