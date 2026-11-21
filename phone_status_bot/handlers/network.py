@@ -178,59 +178,44 @@ def register(bot):
     @bot.message_handler(commands=["wifi"])
     @admin_only
     def handle_wifi(message):
-        """تغيير شبكة Wi-Fi المتصل بها الجهاز.
-
-        تعتمد الطريقة على Termux:API + MacroDroid (مثل /hotspot)، والاتصال
-        يتم مع الشبكات المحفوظة في الهاتف دون الحاجة لكلمة مرور.
+        """عرض الشبكة الحالية أو طلب الاتصال بشبكة محفوظة عبر MacroDroid.
 
         الاستخدام:
-            /wifi                     → عرض الشبكة الحالية والمساعدة
-            /wifi list                → قائمة الشبكات المحفوظة (يتطلب root)
-            /wifi <SSID>              → الاتصال بشبكة محفوظة عبر MacroDroid
-            /wifi reconnect           → إعادة تشغيل واجهة Wi-Fi للتبديل بين
-                                         الشبكات المحفوظة (الأعلى أولوية)
+            /wifi          -> عرض الشبكة الحالية والمساعدة
+            /wifi <SSID>   -> الاتصال بشبكة محفوظة (يدعم المسافات في الاسم)
+            /wifi reconnect -> إعادة تشغيل واجهة Wi-Fi
         """
-        parts = (message.text or "").split(maxsplit=2)
+        # استخراج كل النص بعد الأمر حتى لا تُقسّم أسماء الشبكات التي تحتوي مسافات.
+        command_text = (message.text or "").strip()
+        parts = command_text.split(maxsplit=1)
         arg = parts[1].strip() if len(parts) > 1 else ""
 
-        # --- بدون وسائط: عرض الشبكة الحالية + المساعدة ---
         if not arg:
             current = wifi.get_connected_ssid()
             if current:
-                bot.reply_to(message, f"📡 الشبكة المتصل بها حالياً: <b>{current}</b>\n\n"
-                                      "<code>/wifi &lt;SSID&gt;</code> — الاتصال بشبكة محفوظة (بدون كلمة مرور)\n"
-                                      "<code>/wifi list</code> — الشبكات المحفوظة\n"
-                                      "<code>/wifi reconnect</code> — إعادة الاتصال/التبديل",
-                            parse_mode="HTML")
+                bot.reply_to(
+                    message,
+                    f"📡 الشبكة المتصل بها حالياً: <b>{current}</b>\n\n"
+                    "<code>/wifi &lt;SSID&gt;</code> — الاتصال بشبكة محفوظة\n"
+                    "<code>/wifi reconnect</code> — إعادة الاتصال/التبديل",
+                    parse_mode="HTML",
+                )
             else:
-                bot.reply_to(message, "📡 لا يوجد اتصال Wi-Fi نشط حالياً.\n"
-                                      "جرّب /wifi &lt;SSID&gt; للاتصال بشبكة محفوظة.",
-                            parse_mode="HTML")
+                bot.reply_to(
+                    message,
+                    "📡 لا يوجد اتصال Wi-Fi نشط حالياً.\n"
+                    "جرّب /wifi &lt;SSID&gt; للاتصال بشبكة محفوظة.",
+                    parse_mode="HTML",
+                )
             return
 
-        # --- /wifi list ---
-        if arg.lower() == "list":
-            networks, error = wifi.list_saved_networks()
-            if error:
-                bot.reply_to(message, f"❌ {error}")
-                return
-            if not networks:
-                bot.reply_to(message, "لا توجد شبكات محفوظة قابلة للقراءة.")
-                return
-            current = wifi.get_connected_ssid()
-            lines = [f"• <code>{n}</code>" + (" ⬅️ الحالية" if n == current else "") for n in networks]
-            bot.reply_to(message,
-                         "📋 الشبكات المحفوظة:\n" + "\n".join(lines),
-                         parse_mode="HTML")
-            logger.info("قائمة شبكات wi-Fi (%d) للمستخدم %s", len(networks), message.from_user.id)
-            return
-
-        # --- /wifi reconnect ---
         if arg.lower() == "reconnect":
             ok = wifi.toggle_wifi_interface(False) and wifi.toggle_wifi_interface(True)
             if not ok:
-                bot.reply_to(message,
-                             "❌ تعذر إعادة تشغيل واجهة Wi-Fi. غالباً تتطلب هذه الطريقة صلاحيات root.")
+                bot.reply_to(
+                    message,
+                    "❌ تعذر إعادة تشغيل واجهة Wi-Fi. غالباً تتطلب هذه الطريقة صلاحيات root.",
+                )
                 return
             status = bot.reply_to(message, "🔄 أُعيد تشغيل Wi-Fi، جارٍ التحقق من الاتصال...")
             new_ssid = None
@@ -252,11 +237,9 @@ def register(bot):
             logger.info("wifi reconnect من المستخدم %s -> %s", message.from_user.id, new_ssid)
             return
 
-        # --- /wifi <SSID> : الاتصال بشبكة محفوظة (كلمة المرور اختيارية) ---
         ssid = arg
-        password = parts[2].strip() if len(parts) > 2 else None
         if not wifi.is_valid_ssid(ssid):
-            bot.reply_to(message, "❌ اسم الشبكة غير صالح (أحرف عادية فقط، حتى 64 حرفاً).")
+            bot.reply_to(message, "❌ اسم الشبكة غير صالح (حتى 64 حرفاً).")
             return
 
         current = wifi.get_connected_ssid()
@@ -264,15 +247,14 @@ def register(bot):
             bot.reply_to(message, f"✅ أنت متصل بالفعل بالشبكة: {ssid}")
             return
 
-        if not wifi.connect_via_macrodroid(ssid, password):
-            bot.reply_to(message, "❌ فشل إرسال الأمر إلى MacroDroid. راجع سجل البوت.")
+        if not wifi.connect_via_macrodroid(ssid):
+            bot.reply_to(message, "❌ فشل إرسال أمر الاتصال إلى MacroDroid. راجع سجل البوت.")
             return
 
         status = bot.reply_to(
             message,
-            f"📶 أُرسل أمر الاتصال بشبكة «{ssid}» إلى MacroDroid، جارٍ التحقق...",
+            f"📶 أُرسل طلب الاتصال بشبكة «{ssid}» إلى MacroDroid، جارٍ التحقق...",
         )
-        # انتظار نجاح الاتصال مع فحص دوري (حتى ~30 ثانية)
         new_ssid = None
         for _ in range(10):
             time.sleep(3)
@@ -280,20 +262,22 @@ def register(bot):
             if new_ssid == ssid:
                 break
         if new_ssid == ssid:
-            bot.edit_message_text(status.chat.id, status.message_id,
-                                  f"✅ تم الاتصال بنجاح بالشبكة: {ssid}")
-        else:
-            hint = ""
-            if new_ssid:
-                hint = f"\nالشبكة الحالية الآن: {new_ssid}"
             bot.edit_message_text(
                 status.chat.id, status.message_id,
-                "⚠️ أُرسل أمر الاتصال لكن لم يتم التأكد من نجاحه خلال 30 ثانية."
-                f"{hint}\n"
-                "تأكد من إعداد ماكرو في MacroDroid:\n"
-                "• Trigger: Receive Intent بالـ Action "
-                "`com.macrodroid.intent.action.CONNECT_WIFI` مع Extra اسمه `ssid`\n"
-                "• Action: Connect to WiFi network بقيمة الـ Extra (اترك كلمة المرور فارغة للشبكات المحفوظة).",
+                f"✅ تم الاتصال بنجاح بالشبكة: {ssid}",
             )
-        logger.info("wifi connect '%s' من المستخدم %s -> connected='%s'",
-                    ssid, message.from_user.id, new_ssid)
+        else:
+            hint = f"\nالشبكة الحالية الآن: {new_ssid}" if new_ssid else ""
+            bot.edit_message_text(
+                status.chat.id, status.message_id,
+                "⚠️ لم يتأكد الاتصال خلال 30 ثانية."
+                f"{hint}\n"
+                "تحقق من أن MacroDroid يستقبل Intent بالإعدادات التالية: "
+                "Action = com.macrodroid.intent.action.CONNECT_WIFI، "
+                "وExtra باسم ssid (String) وقيمته *، ثم نفّذ إجراء الاتصال بالشبكة "
+                "باستخدام متغير Extra نفسه.",
+            )
+        logger.info(
+            "wifi connect '%s' من المستخدم %s -> connected='%s'",
+            ssid, message.from_user.id, new_ssid,
+        )
