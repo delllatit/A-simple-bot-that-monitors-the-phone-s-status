@@ -345,8 +345,8 @@ def register(bot):
             # استخدام الحروف الصغيرة (التي تأتي من Termux) أو الكبيرة كبديل
             ssid = net.get("ssid") or net.get("SSID") or "[مخفي]"
             bssid = net.get("bssid") or net.get("BSSID") or "-"
-            rssi = net.get("level") or net.get("RSSI") or "?"
-            freq = net.get("frequency") or "?"
+            rssi = net.get("rssi", "?")
+            freq = net.get("frequency_mhz") or "?"
 
             # تأمين النصوص لتجنب أخطاء HTML
             ssid_safe = html.escape(str(ssid))
