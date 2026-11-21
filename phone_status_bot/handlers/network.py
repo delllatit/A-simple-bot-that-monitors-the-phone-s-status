@@ -304,7 +304,7 @@ def register(bot):
 
 
             try:
-                result = _sp.run(
+                result = subprocess.run(
                     ["termux-wifi-scaninfo"],
                     capture_output=True,
                     text=True,
@@ -319,10 +319,10 @@ def register(bot):
                     "ثبّت حزمة Termux:API عبر: pkg install termux-api",
                 )
                 return
-            except _sp.TimeoutExpired:
+            except subprocess.TimeoutExpired:
                 bot.reply_to(message, "❌ انتهت مهلة تنفيذ المسح (15 ثانية).")
                 return
-            except _sp.CalledProcessError as exc:
+            except subprocess.CalledProcessError as exc:
                 logger.error("termux-wifi-scaninfo فشل: %s", exc.stderr)
                 bot.reply_to(message, f"❌ تعذّر تنفيذ المسح:\n{exc.stderr or exc}")
                 return
