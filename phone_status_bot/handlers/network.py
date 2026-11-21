@@ -195,15 +195,15 @@ def register(bot):
             if current:
                 bot.reply_to(
                     message,
-                    f"📡 الشبكة المتصل بها حالياً: <b>{current}</b>\\n\\n"
-                    "<code>/wifi &lt;SSID&gt;</code> — الاتصال بشبكة محفوظة\\n"
+                    f"📡 الشبكة المتصل بها حالياً: <b>{current}</b>\n\n"
+                    "<code>/wifi &lt;SSID&gt;</code> — الاتصال بشبكة محفوظة\n"
                     "<code>/wifi reconnect</code> — إعادة الاتصال/التبديل",
                     parse_mode="HTML",
                 )
             else:
                 bot.reply_to(
                     message,
-                    "📡 لا يوجد اتصال Wi-Fi نشط حالياً.\\n"
+                    "📡 لا يوجد اتصال Wi-Fi نشط حالياً.\n"
                     "جرّب /wifi &lt;SSID&gt; للاتصال بشبكة محفوظة.",
                     parse_mode="HTML",
                 )
@@ -267,11 +267,11 @@ def register(bot):
                 f"✅ تم الاتصال بنجاح بالشبكة: {ssid}",
             )
         else:
-            hint = f"\\nالشبكة الحالية الآن: {new_ssid}" if new_ssid else ""
+            hint = f"\nالشبكة الحالية الآن: {new_ssid}" if new_ssid else ""
             bot.edit_message_text(
                 status.chat.id, status.message_id,
                 "⚠️ لم يتأكد الاتصال خلال 30 ثانية."
-                f"{hint}\\n"
+                f"{hint}\n"
                 "تحقق من أن MacroDroid يستقبل Intent بالإعدادات التالية: "
                 "Action = com.macrodroid.intent.action.CONNECT_WIFI، "
                 "وExtra باسم ssid (String) وقيمته *، ثم نفّذ إجراء الاتصال بالشبكة "
