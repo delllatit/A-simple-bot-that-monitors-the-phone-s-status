@@ -15,12 +15,6 @@ from phone_status_bot.core.termux import (
 )
 from phone_status_bot.services.cellular import WIFI_COMMAND
 
-# مسار ملف إعدادات Wi-Fi في Android (يتطلب root لقراءته)
-WIFI_CONFIG_CANDIDATES = (
-    "/data/misc/apexdata/com.android.wifi/WifiConfigStore.xml",  # Android 10+
-    "/data/misc/wifi/WifiConfigStore.xml",                        # Android أقدم
-)
-
 # الـ Action المتفق عليه مع MacroDroid (اسم الشبكة في Extra اسمه ssid)
 MACROIDROID_WIFI_ACTION = "com.macrodroid.intent.action.CONNECT_WIFI"
 
