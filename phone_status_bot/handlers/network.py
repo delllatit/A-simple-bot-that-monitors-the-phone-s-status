@@ -344,15 +344,14 @@ def register(bot):
 
             lines = [f"📶 الشبكات المرصودة ({len(networks)}):\n"]
             for net in networks:
-                ssid = net.get("SSID") or "<مخفي>"
-                bssid = net.get("BSSID", "-")
-                rssi = net.get("RSSI", "?")
-                freq = net.get("frequency", "?")
+                ssid_safe = html.escape(net.get("SSID") or "[مخفي]")
+                bssid_safe = html.escape(net.get("BSSID", "-"))
                 lines.append(
-                    f"• <b>{ssid}</b>\n"
-                    f"   BSSID: <code>{bssid}</code>\n"
-                    f"   الإشارة: {rssi} dBm | التردد: {freq} MHz\n"
+                    f"• <b>{ssid_safe}</b>\n"
+                    f"   BSSID: <code>{bssid_safe}</code>\n"
+                    f"   الإشارة: {net.get('RSSI', '?')} dBm | التردد: {net.get('frequency', '?')} MHz\n"
                 )
+
             lines.append("\nℹ️ هذه نتائج آخر مسح أجراه النظام، وليست مسحاً فورياً.")
             bot.reply_to(message, "\n".join(lines), parse_mode="HTML")
             logger.info("scanwifi: %d شبكة للمستخدم %s", len(networks), message.from_user.id)
