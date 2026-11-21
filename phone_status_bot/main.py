@@ -37,7 +37,6 @@ from phone_status_bot.handlers import (
     recording,
     screen,
     system,
-    wifi_scan,
 )
 # ترتيب التسجيل مهم: معالجات الأوامر أولاً، ثم general.handle_unknown
 # (المسجَّل داخل register(general)) أخيراً ليلتقط ما تبقى من نصوص غير معروفة.
@@ -53,7 +52,6 @@ HANDLER_MODULES = (
     system,
     clipboard,
     screen,
-    wifi_scan,
     general,
 )
 
