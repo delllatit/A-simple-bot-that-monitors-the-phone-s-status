@@ -296,4 +296,4 @@ def register(bot):
             )
         logger.info("wifi connect '%s' من المستخدم %s -> connected='%s'",
                     ssid, message.from_user.id, new_ssid)
- add/hotspot
+ 
