@@ -18,7 +18,7 @@ from phone_status_bot.services import battery, bluetooth, cellular, hotspot, who
 def register(bot):
     state.init_bot(bot)
 
-    # ================== /battery ==================
+    # /battery
     @bot.message_handler(commands=["battery"])
     @admin_only
     @requires("battery")
@@ -30,7 +30,7 @@ def register(bot):
         bot.reply_to(message, report, parse_mode="HTML")
         logger.info("تم جلب معلومات البطارية للمستخدم %s", message.from_user.id)
 
-    # ================== /ip ==================
+    # /ip
     @bot.message_handler(commands=["ip"])
     @admin_only
     def get_ip(message):
@@ -171,10 +171,10 @@ def register(bot):
         else:
             bot.reply_to(message, "❌ فشل إرسال الأمر. راجع سجل البوت.")
         logger.info("bluetooth %s من المستخدم %s", arg, message.from_user.id)
-=======
+
         logger.info("hotspot %s من المستخدم %s", arg, message.from_user.id)
 
-    # ================== /wifi ==================
+    # /wifi
     @bot.message_handler(commands=["wifi"])
     @admin_only
     def handle_wifi(message):
