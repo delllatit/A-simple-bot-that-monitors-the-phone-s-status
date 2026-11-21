@@ -296,4 +296,63 @@ def register(bot):
             )
         logger.info("wifi connect '%s' من المستخدم %s -> connected='%s'",
                     ssid, message.from_user.id, new_ssid)
+        # ================== /scanwifi ==================
+        @bot.message_handler(commands=["scanwifi"])
+        @admin_only
+        def handle_scanwifi(message):
+            """عرض شبكات Wi-Fi التي رصدها آخر مسح أجراه نظام أندرويد."""
+           
+    
+            try:
+                result = _sp.run(
+                    ["termux-wifi-scaninfo"],
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    timeout=15,
+                )
+                networks = json.loads(result.stdout or "[]")
+            except FileNotFoundError:
+                bot.reply_to(
+                    message,
+                    "❌ أداة termux-wifi-scaninfo غير مثبتة.\n"
+                    "ثبّت حزمة Termux:API عبر: pkg install termux-api",
+                )
+                return
+            except _sp.TimeoutExpired:
+                bot.reply_to(message, "❌ انتهت مهلة تنفيذ المسح (15 ثانية).")
+                return
+            except _sp.CalledProcessError as exc:
+                logger.error("termux-wifi-scaninfo فشل: %s", exc.stderr)
+                bot.reply_to(message, f"❌ تعذّر تنفيذ المسح:\n{exc.stderr or exc}")
+                return
+            except json.JSONDecodeError:
+                bot.reply_to(message, "❌ تعذّر تحليل بيانات الشبكات.")
+                return
+    
+            if not networks:
+                bot.reply_to(
+                    message,
+                    "لا توجد نتائج مسح حالياً.\n"
+                    "💡 افتح إعدادات الواي فاي لبضع ثوانٍ لإجبار النظام على مسح جديد، ثم أعد المحاولة.",
+                )
+                return
+    
+            # ترتيب حسب قوة الإشارة (الأقوى أولاً)
+            networks.sort(key=lambda n: n.get("RSSI", -200), reverse=True)
+    
+            lines = [f"📶 الشبكات المرصودة ({len(networks)}):\n"]
+            for net in networks:
+                ssid = net.get("SSID") or "<مخفي>"
+                bssid = net.get("BSSID", "-")
+                rssi = net.get("RSSI", "?")
+                freq = net.get("frequency", "?")
+                lines.append(
+                    f"• <b>{ssid}</b>\n"
+                    f"   BSSID: <code>{bssid}</code>\n"
+                    f"   الإشارة: {rssi} dBm | التردد: {freq} MHz\n"
+                )
+            lines.append("\nℹ️ هذه نتائج آخر مسح أجراه النظام، وليست مسحاً فورياً.")
+            bot.reply_to(message, "\n".join(lines), parse_mode="HTML")
+            logger.info("scanwifi: %d شبكة للمستخدم %s", len(networks), message.from_user.id)
  
