@@ -1,27 +1,8 @@
-"""تغيير شبكة Wi-Fi المتصل بها الجهاز.
+"""تغيير شبكة Wi-Fi المتصل بها الجهاز عبر MacroDroid دون الحاجة إلى root.
 
-Android لا يسمح للتطبيقات العادية (ومنها Termux بدون root) بالاتصال بشبكة
-Wi-Fi جديدة برمجياً مباشرة، لكن Termux:API يوفر أمر `am` الذي يرسل
-broadcast يستقبله MacroDroid وينفذ مهمة "Connect to WiFi network" — وهذا
-يعمل مع الشبكات المحفوظة في الهاتف دون الحاجة لإدخال كلمة مرور.
-
-التصميم الحالي (بدون root):
-   البوت يرسل broadcast عبر Termux:API (`am broadcast`) يحمل اسم الشبكة،
-   وماكرو MacroDroid ينفذ الاتصال بالشبكة المحفوظة.
-   يجب إنشاء ماكرو في MacroDroid:
-       Trigger : Receive Intent / Broadcast
-                 Action : com.macrodroid.intent.action.CONNECT_WIFI
-                 Extra  : ssid (نص)
-       Action  : Connect to WiFi network → قيمة الـ Extra "ssid"
-                 (اترك خانة كلمة المرور فارغة للشبكات المحفوظة)
-
-طريقة متقدمة (اختيارية، تتطلب root):
-   - قراءة الشبكات المحفوظة من WifiConfigStore.xml لأمر /wifi list.
-   - إعادة تشغيل واجهة Wi-Fi (svc wifi disable ثم enable) للتبديل بين
-     الشبكات المحفوظة حسب الأولوية.
-
-مدخلات المستخدم تُتحقق منها بـ is_valid_ssid لمنع حقن الأوامر، وتُمرَّر
-دائماً كقوائم مفصولة بدون shell=True.
+يرسل البوت Intent Broadcast إلى MacroDroid مع اسم الشبكة في Extra باسم
+ssid. يجب أن تكون الشبكة محفوظة في الهاتف، ويجب أن يقرأ الماكرو قيمة Extra
+ثم يمررها إلى إجراء Connect to WiFi network.
 """
 
 import re
