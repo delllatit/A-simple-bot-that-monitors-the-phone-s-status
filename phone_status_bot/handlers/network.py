@@ -1,7 +1,7 @@
 """معالجات الشبكة والحالة: /ip /whois /network /cellular /battery /wifi."""
 
 import time
-import subprocess
+import subprocessله
 
 import requests
 
@@ -12,7 +12,8 @@ from phone_status_bot.core.termux import fetch_public_ip
 from phone_status_bot.core import state
 import time
 
-from phone_status_bot.services import battery, cellular, hotspot, whois, wifi
+from phone_status_bot.services import battery, bluetooth, cellular, hotspot, whois, wifi
+
 
 def register(bot):
     state.init_bot(bot)
@@ -153,7 +154,7 @@ def register(bot):
             bot.reply_to(message, "📶 انرسل أمر " + ("التشغيل" if arg == "on" else "الإيقاف") + " لـ MacroDroid.")
         else:
             bot.reply_to(message, "❌ فشل إرسال الأمر. راجع سجل البوت.")
-<<<<<<< HEAD
+
                 # ================== /bluetooth ==================
     @bot.message_handler(commands=["bluetooth"])
     @admin_only
@@ -296,4 +297,3 @@ def register(bot):
             )
         logger.info("wifi connect '%s' من المستخدم %s -> connected='%s'",
                     ssid, message.from_user.id, new_ssid)
->>>>>>> add/hotspot
