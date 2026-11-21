@@ -4,6 +4,7 @@ import time
 import subprocess
 import json
 import requests
+import html
 
 from phone_status_bot.core.logging_setup import logger
 from phone_status_bot.core.capabilities import requires
