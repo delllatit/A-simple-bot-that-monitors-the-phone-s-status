@@ -309,7 +309,7 @@ def register(bot):
                     ["termux-wifi-scaninfo"],
                     capture_output=True,
                     text=True,
-                    check=True,
+       t             check=True,
                     timeout=15,
                 )
                 networks = json.loads(result.stdout or "[]")
@@ -341,11 +341,15 @@ def register(bot):
 
             # ترتيب حسب قوة الإشارة (الأقوى أولاً)
             networks.sort(key=lambda n: n.get("RSSI", -200), reverse=True)
+            for net in networks:
+                # استخدام الدوال البديلة لضمان قراءة البيانات سواء كانت الحروف كبيرة أو صغيرة
+                ssid = net.get("ssid") or net.get("SSID") or "[مخفي]"
+                bssid = net.get("bssid") or net.get("BSSID") or "-"
+                rssi = net.get("level") or net.get("RSSI") or "?"
+                freq = net.get("frequency") or "?"sort(key=lambda n: n.get("RSSI", -200), reverse=True)
 
             lines = [f"📶 الشبكات المرصودة ({len(networks)}):\n"]
-            for net in networks:
-                ssid_safe = html.escape(net.get("SSID") or "[مخفي]")
-                bssid_safe = html.escape(net.get("BSSID", "-"))
+         
                 lines.append(
                     f"• <b>{ssid_safe}</b>\n"
                     f"   BSSID: <code>{bssid_safe}</code>\n"
