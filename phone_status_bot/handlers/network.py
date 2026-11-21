@@ -153,7 +153,7 @@ def register(bot):
             bot.reply_to(message, "📶 انرسل أمر " + ("التشغيل" if arg == "on" else "الإيقاف") + " لـ MacroDroid.")
         else:
             bot.reply_to(message, "❌ فشل إرسال الأمر. راجع سجل البوت.")
-<<<<<<< HEAD
+
                 # ================== /bluetooth ==================
     @bot.message_handler(commands=["bluetooth"])
     @admin_only
@@ -170,7 +170,7 @@ def register(bot):
         else:
             bot.reply_to(message, "❌ فشل إرسال الأمر. راجع سجل البوت.")
         logger.info("bluetooth %s من المستخدم %s", arg, message.from_user.id)
-=======
+
         logger.info("hotspot %s من المستخدم %s", arg, message.from_user.id)
 
     # ================== /wifi ==================
@@ -296,4 +296,4 @@ def register(bot):
             )
         logger.info("wifi connect '%s' من المستخدم %s -> connected='%s'",
                     ssid, message.from_user.id, new_ssid)
->>>>>>> add/hotspot
+ add/hotspot
