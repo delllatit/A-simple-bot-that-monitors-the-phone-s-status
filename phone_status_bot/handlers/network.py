@@ -1,7 +1,7 @@
 """معالجات الشبكة والحالة: /ip /whois /network /cellular /battery /wifi."""
 
 import time
-import subprocessله
+import subprocess
 
 import requests
 
@@ -108,7 +108,7 @@ def register(bot):
             logger.exception("فشل في تنفيذ استعلام whois")
             bot.reply_to(message, "❌ تعذر تنفيذ استعلام whois. راجع سجل البوت.")
 
-    # ================== /network ==================
+    #/network
     @bot.message_handler(commands=["network"])
     @admin_only
     @requires("wifi")
@@ -123,7 +123,7 @@ def register(bot):
         bot.reply_to(message, report, parse_mode="HTML")
         logger.info("تم جلب معلومات الشبكة للمستخدم %s", message.from_user.id)
 
-    # ================== /cellular ==================
+    #  /cellular
     @bot.message_handler(commands=["cellular", "signal"])
     @admin_only
     @requires("cellular")
