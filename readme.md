@@ -143,6 +143,11 @@ python mybot_qwen1.py
 - `/help` — Show command list
 - `/battery` — Battery details
 - `/network` — Wi-Fi information
+- `/hotspot - on/off` - hotspot on/off
+-  `/clipboard` - save text
+- `/wifi`  -change WiFi ssid
+
+- `/wifi` — Show/change the connected Wi-Fi network (`/wifi <SSID>` connects to a saved network via Termux:API + MacroDroid without a password, `/wifi list`, `/wifi reconnect`)
 - `/cellular` — Cellular signal details
 - `/location` — Current GPS location
 - `/ip` — Local and public IP information
@@ -157,6 +162,10 @@ python mybot_qwen1.py
 - `/cpu` — CPU and memory usage
 - `/contacts` — Contacts list
 - `/call` — Place a call
+- `/ping` - test conected
+- `
+- `
+- `
 
 ## Security and Privacy Warning
 
@@ -185,7 +194,7 @@ The project was originally implemented as a single large Python file, but it has
 This project is shared for educational and technical experimentation purposes. Please check whether the repository includes a specific license before using it in production or public deployment environments.
 ```
 
-### 1) تثبيت Termux:API
+### 1) install Termux:API
 
 ```bash
 pkg update && pkg upgrade
