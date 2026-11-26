@@ -9,6 +9,9 @@ CALL_COMMAND = "termux-telephony-call"
 # الصيغة الدولية المقبولة لأرقام الهاتف
 PHONE_PATTERN = re.compile(r"\+?\d{7,15}")
 
+# أرقام المكالمة: رقم عادي أو كود USSD مثل *100# (أرقام و * و # و + فقط)
+DIAL_PATTERN = re.compile(r"[\d*#+]{2,30}")
+
 
 def normalize_phone(raw):
     """إزالة المسافات من رقم هاتف."""
@@ -18,6 +21,11 @@ def normalize_phone(raw):
 def is_valid_phone(phone):
     """التحقق من صلاحية رقم الهاتف (الصيغة الدولية)."""
     return bool(PHONE_PATTERN.fullmatch(phone))
+
+
+def is_valid_dial(value):
+    """يقبل رقم هاتف عاديًا أو كود USSD مثل *100#."""
+    return bool(DIAL_PATTERN.fullmatch(value))
 
 
 def _run(command_args, timeout=20):
@@ -48,7 +56,7 @@ def send_sms(phone_number, sms_text):
 
 def make_call(phone_number):
     """بدء مكالمة. يرجع tuple (success, detail) بنفس conventions send_sms."""
-    if not is_valid_phone(phone_number):
+    if not is_valid_dial(phone_number):
         return False, "invalid_input"
     try:
         result = _run([CALL_COMMAND, phone_number])
