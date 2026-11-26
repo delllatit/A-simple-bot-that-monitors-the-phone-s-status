@@ -1,201 +1,112 @@
+# Phone Status Bot
 
-# Phone Status Monitor Bot
+A small Telegram bot that runs on your own Android phone (inside [Termux](https://termux.dev)) and lets you check on the phone and control it remotely from Telegram. Useful for checking battery, network and location, finding a lost phone, and running quick actions without touching the device.
 
-A simple Telegram bot designed to run on Android devices via Termux. It allows you to monitor the phone's status and collect useful device information such as battery level, network details, location, IP information, and media related data.
-
-> **Personal bot model — not a public service.** This project is a *template*, not a hosted bot. It is not meant for general public use: every user clones the repository and creates **their own private bot** for **their own device**, with their own `TELEGRAM_BOT_TOKEN` (from @BotFather) and their own `ADMIN_ID`. The bot only answers admin IDs listed in your `.env`; everyone else is rejected. No credentials, tokens, or secrets are shared between installations — never commit your real `.env` to Git.
-
-This project is intended for educational, testing, and authorized device monitoring use cases only. It interacts with sensitive Android features, so it must be used responsibly and only on devices you own or are explicitly authorized to monitor.
-
-> Important: This project can access sensitive permissions such as camera, GPS, contacts, SMS, calls, and microphone. Use it only with proper consent and in compliance with local laws and privacy policies.
+> **Own devices only.** Run this only on a phone you own, with your own Telegram bot token. Only Telegram IDs listed in `ADMIN_ID` can use it. Do not install it on anyone else's phone without their knowledge and consent.
 
 ## Features
 
-- Battery status and charging information
-- Wi-Fi details
-- Cellular network information
-- Local and public IP address
-- GPS-based current location
-- Front or rear camera photo capture
-- Contact list access
-- SMS sending
-- Phone call initiation
-- Audio recording with automatic stop
-- Bot uptime and status monitoring
-- Admin management via `ADMIN_ID`
-- System information such as storage and CPU usage
+- **Status:** battery (with low-battery alerts), CPU and memory, storage, uptime, bot status
+- **Network:** Wi-Fi info and switching, cellular signal, hotspot and Bluetooth on/off, IP address, whois lookup, ping
+- **Location:** current GPS location, plus a **lost mode** that sends the location every N minutes (1 to 120) until stopped and survives reboots
+- **Find my phone:** ring, tone, flash, vibrate
+- **Camera and screen:** front/back photo, screenshot, audio recording (`/record`, `/stop`)
+- **Phone:** contacts list, place a call, send SMS, set clipboard text
+- **Security:** admin-only commands, rate limiting, and an alert to the admins when someone else tries to use the bot
+- **Reliability:** retry with backoff, persistent outbox for messages that fail while offline, rotating log file
 
 ## Requirements
 
-- Android device
-- Termux installed
-- Termux:API package
-- Python 3.8 or newer
-- Telegram Bot Token
-- Telegram user ID for the admin
+- Android phone with [Termux](https://termux.dev) and the **Termux:API** app (grant camera, location, microphone, SMS, contacts permissions as needed)
+- Python 3
+- A Telegram bot token from [@BotFather](https://t.me/BotFather)
+- Your own numeric Telegram user ID
 
 ## Installation
 
-### 1) Install Termux and required packages
-
 ```bash
-pkg update && pkg upgrade
-pkg install termux-api git python
-```
-
-### 2) Clone the repository
-
-```bash
+pkg update && pkg install python git termux-api
 git clone https://github.com/delllatit/A-simple-bot-that-monitors-the-phone-s-status.git
 cd A-simple-bot-that-monitors-the-phone-s-status
-```
-
-### 3) Install Python dependencies
-
-```bash
 pip install -r requirements.txt
+cp .env.example .env
 ```
 
 ## Configuration
 
-The bot reads all settings from environment variables. Two supported ways:
+Edit `.env`:
 
-**Option A � `~/.bashrc` (recommended for Termux personal setups):**
-Keep secrets out of the repository entirely. Create a private file and source it:
+| Variable | Description |
+|---|---|
+| `TELEGRAM_BOT_TOKEN` | Token from BotFather |
+| `ADMIN_ID` | Telegram user ID(s) allowed to use the bot |
+| `BOT_LOG_FILE` | Path of the log file |
+| `BATTERY_CHECK_INTERVAL` | Seconds between battery checks (default 1800) |
+| `RECORD_MAX_SECONDS` | Max length of an audio recording (default 600) |
+| `RATE_LIMIT_WINDOW` | Seconds between commands per user (default 3) |
+| `SMS_SECRET` | Secret for the local SMS gateway. Generate with `python -c "import secrets; print(secrets.token_hex(16))"` |
+| `SMS_GATEWAY_PORT` | Port of the local SMS gateway (default 8765, listens on 127.0.0.1 only) |
+| `SMS_RATE_MAX` / `SMS_RATE_WINDOW` | Rate limit for the SMS gateway |
 
-```bash
-# ~/.bot_secrets  (chmod 600)
-export TELEGRAM_BOT_TOKEN="your-token-from-botfather"
-export ADMIN_ID="your-telegram-id"
-export SMS_SECRET="$(python -c 'import secrets; print(secrets.token_hex(16))')"  # generate once, then hardcode the value
-```
+Never commit your real `.env`. It is already in `.gitignore`.
 
-```bash
-chmod 600 ~/.bot_secrets
-echo 'source ~/.bot_secrets' >> ~/.bashrc
-```
-
-**Option B � `.env` file:** create `.env` in the project root (never commit it):
-
-```env
-TELEGRAM_BOT_TOKEN=YOUR_TELEGRAM_BOT_TOKEN
-ADMIN_ID=YOUR_ADMIN_TELEGRAM_ID
-SMS_SECRET=unique_random_hex_per_installation
-BOT_LOG_FILE=/data/data/com.termux/files/home/bot-logs/mybot.log
-BATTERY_CHECK_INTERVAL=1800
-RECORD_MAX_SECONDS=600
-RATE_LIMIT_WINDOW=3
-SMS_RATE_MAX=10
-SMS_RATE_WINDOW=60
-```
-
-### Configuration Notes
-
-- `TELEGRAM_BOT_TOKEN`: Your Telegram bot token from BotFather
-- `ADMIN_ID`: One or more admin Telegram IDs separated by commas
-- `SMS_SECRET`: Shared key for the local SMS gateway (loopback only). If unset, a random key is generated per run and printed to the log.
-- `SMS_RATE_MAX` / `SMS_RATE_WINDOW`: max SMS gateway requests per window (default 10/60s) � protects your Telegram account from local flooding.
-- `BOT_LOG_FILE`: Log file path
-- `BATTERY_CHECK_INTERVAL`: Battery monitoring interval in seconds
-- `RECORD_MAX_SECONDS`: Max audio recording duration
-- `RATE_LIMIT_WINDOW`: Rate limit window in seconds
-
-## Project Structure
-
-```text
-A-simple-bot-that-monitors-the-phone-s-status/
-├── mybot_qwen1.py
-├── requirements.txt
-├── readme.md
-├── .gitignore
-└── phone_status_bot/
-    ├── __init__.py
-    ├── main.py
-    ├── core/
-    │   ├── config.py
-    │   ├── permissions.py
-    │   ├── state.py
-    │   ├── termux.py
-    │   ├── logging_setup.py
-    │   └── html_utils.py
-    ├── handlers/
-    ├── services/
-    └── ...
-```
-
-## Running the Bot
-
-You can start the bot using either of these commands:
+## Usage
 
 ```bash
 python -m phone_status_bot.main
 ```
 
-or:
+(`python mybot_qwen1.py` still works for the old entry point.) Then send `/start` to your bot in Telegram.
 
-```bash
-python mybot_qwen1.py
+### Commands
+
+| Command | What it does |
+|---|---|
+| `/start`, `/help` | Show the command list |
+| `/battery` | Battery info |
+| `/network`, `/wifi` | Wi-Fi info, view or change network |
+| `/cellular` | Cellular signal and data |
+| `/hotspot on\|off`, `/bluetooth on\|off` | Toggle hotspot or Bluetooth |
+| `/ping`, `/ip`, `/whois` | Connectivity, IP addresses, IP owner info |
+| `/location` | Current GPS location |
+| `/ring`, `/tone`, `/flash`, `/vibrate` | Make the phone easy to find |
+| `/selfie`, `/photo` | Front or back camera photo |
+| `/screenshot` | Screenshot |
+| `/record`, `/stop` | Start audio recording, stop and send it |
+| `/clipboard` | Put text in the phone clipboard |
+| `/contacts`, `/call`, `/sms` | Contacts, call, send SMS |
+| `/storage`, `/cpu`, `/uptime`, `/status` | System and bot status |
+| `/admins`, `/capabilities` | Approved admins, what this device supports |
+
+Lost mode and alert settings have their own commands; see `/help` in the bot.
+
+## Project layout
+
+```
+phone_status_bot/
+  main.py        entry point and polling loop
+  core/          config, state, permissions, Termux helpers, outbox
+  handlers/      Telegram command handlers
+  services/      battery, location, tracking, camera, Wi-Fi, SMS gateway, alerts
+mybot_qwen1.py   legacy entry point
 ```
 
-## Available Commands
+## Security notes
 
-- `/start` — Start the bot and show available commands
-- `/help` — Show command list
-- `/battery` — Battery details
-- `/network` — Wi-Fi information
-- `/hotspot - on/off` - hotspot on/off
--  `/clipboard` - save text
-- `/wifi`  -change WiFi ssid
-
-- `/wifi` — Show/change the connected Wi-Fi network (`/wifi <SSID>` connects to a saved network via Termux:API + MacroDroid without a password, `/wifi list`, `/wifi reconnect`)
-- `/cellular` — Cellular signal details
-- `/location` — Current GPS location
-- `/ip` — Local and public IP information
-- `/whois` — IP owner lookup
-- `/record` — Start voice recording
-- `/stop` — Stop and send the recording
-- `/sms` — Send an SMS
-- `/uptime` — Bot runtime
-- `/status` — Bot status
-- `/admins` — Admin list
-- `/storage` — Disk usage
-- `/cpu` — CPU and memory usage
-- `/contacts` — Contacts list
-- `/call` — Place a call
-- `/ping` - test conected
-- `
-- `
-- `
-
-## Security and Privacy Warning
-
-This bot can access and control features that may be considered highly sensitive, including:
-
-- Camera
-- GPS/location
-- Contacts
-- SMS messages
-- Phone calls
-- Microphone recording
-
-Use this project only if you:
-
-- Own the device
-- Have explicit permission from the owner
-- Follow all applicable laws and privacy requirements
-- Understand the security implications of running access-control tools
-
-## Notes
-
-The project was originally implemented as a single large Python file, but it has been reorganized into a more maintainable package structure under `phone_status_bot` for better code management and modularity.
+- Keep the bot token and `.env` private. If the token leaks, revoke it in BotFather.
+- Keep `ADMIN_ID` limited to yourself. Anyone in that list can see your location, camera and SMS.
+- Use a Telegram account with two-step verification.
 
 ## License
 
-This project is shared for educational and technical experimentation purposes. Please check whether the repository includes a specific license before using it in production or public deployment environments.
-```
+Add a license of your choice (for example MIT) as a `LICENSE` file.
 
-### 1) install Termux:API
+---
 
-```bash
-pkg update && pkg upgrade
-pkg install termux-api git python
+## &#1576;&#1575;&#1604;&#1593;&#1585;&#1576;&#1610; (&#1605;&#1604;&#1582;&#1589;)
+
+&#1576;&#1608;&#1578; &#1578;&#1610;&#1604;&#1610;&#1580;&#1585;&#1575;&#1605; &#1576;&#1587;&#1610;&#1591; &#1610;&#1593;&#1605;&#1604; &#1593;&#1604;&#1609; &#1607;&#1575;&#1578;&#1601;&#1603; &#1575;&#1604;&#1571;&#1606;&#1583;&#1585;&#1608;&#1610;&#1583; &#1593;&#1576;&#1585; Termux&#1548; &#1610;&#1578;&#1610;&#1581; &#1604;&#1603; &#1605;&#1585;&#1575;&#1602;&#1576;&#1577; &#1607;&#1575;&#1578;&#1601;&#1603; &#1608;&#1575;&#1604;&#1578;&#1581;&#1603;&#1605; &#1576;&#1607; &#1593;&#1606; &#1576;&#1593;&#1583;: &#1575;&#1604;&#1576;&#1591;&#1575;&#1585;&#1610;&#1577;&#1548; &#1575;&#1604;&#1588;&#1576;&#1603;&#1577;&#1548; &#1575;&#1604;&#1605;&#1608;&#1602;&#1593;&#1548; &#1608;&#1590;&#1593; &#1575;&#1604;&#1578;&#1578;&#1576;&#1617;&#1593; &#1593;&#1606;&#1583; &#1575;&#1604;&#1590;&#1610;&#1575;&#1593;&#1548; &#1575;&#1604;&#1585;&#1606;&#1610;&#1606;&#1548; &#1575;&#1604;&#1603;&#1575;&#1605;&#1610;&#1585;&#1575;&#1548; &#1604;&#1602;&#1591;&#1577; &#1575;&#1604;&#1588;&#1575;&#1588;&#1577;&#1548; &#1575;&#1604;&#1578;&#1587;&#1580;&#1610;&#1604; &#1575;&#1604;&#1589;&#1608;&#1578;&#1610;&#1548; &#1575;&#1604;&#1585;&#1587;&#1575;&#1574;&#1604; &#1608;&#1575;&#1604;&#1605;&#1603;&#1575;&#1604;&#1605;&#1575;&#1578;.
+
+**&#1575;&#1604;&#1578;&#1588;&#1594;&#1610;&#1604;:** &#1579;&#1576;&#1617;&#1578; Termux &#1608; Termux:API&#1548; &#1579;&#1605; `pip install -r requirements.txt`&#1548; &#1608;&#1575;&#1606;&#1587;&#1582; `.env.example` &#1573;&#1604;&#1609; `.env` &#1608;&#1590;&#1593; &#1578;&#1608;&#1603;&#1606; &#1575;&#1604;&#1576;&#1608;&#1578; &#1605;&#1606; BotFather &#1608;&#1605;&#1593;&#1585;&#1617;&#1601;&#1603; &#1601;&#1610; `ADMIN_ID`&#1548; &#1579;&#1605; &#1588;&#1594;&#1617;&#1604; `python -m phone_status_bot.main`.
+
+**&#1578;&#1606;&#1576;&#1610;&#1607;:** &#1575;&#1587;&#1578;&#1582;&#1583;&#1605;&#1607; &#1593;&#1604;&#1609; &#1607;&#1575;&#1578;&#1601;&#1603; &#1571;&#1606;&#1578; &#1601;&#1602;&#1591;. &#1604;&#1575; &#1578;&#1590;&#1593; &#1605;&#1593;&#1585;&#1617;&#1601; &#1571;&#1610; &#1588;&#1582;&#1589; &#1601;&#1610; `ADMIN_ID` &#1573;&#1604;&#1575; &#1573;&#1584;&#1575; &#1603;&#1606;&#1578; &#1578;&#1579;&#1602; &#1576;&#1607;&#1548; &#1608;&#1604;&#1575; &#1578;&#1606;&#1588;&#1585; &#1605;&#1604;&#1601; `.env` &#1571;&#1576;&#1583;&#1575;&#1611;.
