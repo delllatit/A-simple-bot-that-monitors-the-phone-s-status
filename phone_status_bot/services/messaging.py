@@ -59,7 +59,8 @@ def make_call(phone_number):
     if not is_valid_dial(phone_number):
         return False, "invalid_input"
     try:
-        result = _run([CALL_COMMAND, phone_number])
+        # أندرويد يقطع الرقم عند # إلا إذا رُمّزت %23
+        result = _run([CALL_COMMAND, phone_number.replace("#", "%23")])
         if result.returncode != 0:
             return False, (result.stderr or result.stdout).strip()
         return True, None
